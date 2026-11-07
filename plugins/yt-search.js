@@ -14,8 +14,10 @@ module.exports = {
       const results = (search.videos || []).slice(0, 10).map(v => ({
         title: v.title,
         videoId: v.videoId,
+        url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
         duration: v.timestamp,
         channel: v.author?.name || "Unknown",
+        views: v.views || 0,
         thumbnail: v.thumbnail
       }));
 
