@@ -3,10 +3,6 @@ const User = require("../models/User");
 
 const JWT_SECRET = process.env.JWT_SECRET || "apex_jwt_secret_default";
 
-/**
- * Reset daily counters if the date has changed.
- * Called on every authenticated request.
- */
 function checkDailyReset(user) {
   const today = new Date().toISOString().split("T")[0];
   if (user.lastResetDate !== today) {
@@ -16,46 +12,34 @@ function checkDailyReset(user) {
   }
 }
 
-/**
- * Validate requests using EITHER:
- *   1. A query param `?api=apex_live_...` (API key)
- *   2. An `Authorization: Bearer <apiKey>` header
- *   3. An `Authorization: Bearer <JWT>` header (from /api/auth/login or Google OAuth)
- *
- * This dual-mode auth is what prevents the "profile page logs me out"
- * loop that happened when the frontend sent a JWT but the middleware
- * only knew how to look up API keys.
- */
 async function validateApiKey(req, res, next) {
   try {
-    // ---- 1. Extract credential ----
-    let rawKey = req.query.api;
-    if (!rawKey && req.headers.authorization) {
-      rawKey = req.headers.authorization.replace(/^Bearer\s+/i, "").trim();
-    }
+    /* ═══════════════════════════════════════════════════════════
+       STRICT MODE — ?api=<key> query param is MANDATORY.
+       Requests with only Authorization: Bearer header will be
+       REJECTED with 401. This is the requirement.
+       ═══════════════════════════════════════════════════════════ */
+    const rawKey = req.query.api;
 
     if (!rawKey) {
       return res.status(401).json({
         success: false,
-        error: "Unauthorized: You must be logged in with a valid API key to use Apex API services."
+        error: "Unauthorized: The 'api' query parameter is required. Append ?api=YOUR_KEY (or &api=YOUR_KEY) to every request."
       });
     }
 
-    // ---- 2. Resolve user (API key first, then JWT) ----
-    let user = null;
+    // ── Resolve user: API key first, then JWT fallback ──
+    let user = await User.findOne({ apiKey: rawKey });
 
-    // Try as API key
-    user = await User.findOne({ apiKey: rawKey });
-
-    // Fall back: try as JWT
     if (!user) {
+      // Fallback: support JWT passed as ?api=<token> (for profile page compatibility)
       try {
         const decoded = jwt.verify(rawKey, JWT_SECRET);
         if (decoded && decoded.userId) {
           user = await User.findById(decoded.userId);
         }
       } catch (jwtErr) {
-        // Not a valid JWT either — will fall through to 401 below
+        // Not a valid JWT — will fall through to 401
       }
     }
 
@@ -66,7 +50,7 @@ async function validateApiKey(req, res, next) {
       });
     }
 
-    // ---- 3. Banned check ----
+    // ── Banned check ──
     if (user.status === "Banned") {
       return res.status(403).json({
         success: false,
@@ -74,10 +58,9 @@ async function validateApiKey(req, res, next) {
       });
     }
 
-    // ---- 4. Daily reset + rate limiting ----
+    // ── Daily reset + endpoint rate limit ──
     checkDailyReset(user);
 
-    // Safety: ensure endpointStats is a Map (schema may have been reset)
     if (!user.endpointStats || typeof user.endpointStats.get !== "function") {
       user.endpointStats = new Map();
     }
@@ -94,7 +77,7 @@ async function validateApiKey(req, res, next) {
       });
     }
 
-    // ---- 5. Increment counters ----
+    // ── Increment counters ──
     user.endpointStats.set(endpointPath, currentCount + 1);
     user.totalRequests += 1;
     user.requestsToday += 1;
