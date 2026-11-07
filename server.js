@@ -69,7 +69,8 @@ const SYSTEM_ENDPOINTS = [
   { id: 'yt-audio-dl', name: 'YouTube · Audio DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/yt/audio' },
   { id: 'yt-video-dl', name: 'YouTube · Video DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/yt/video' },
   { id: 'an1-search', name: 'AN1 · Search', category: 'app', categoryLabel: 'App', path: '/api/v1/apps/an1/search' },
-  { id: 'an1-dl', name: 'AN1 · Direct DL', category: 'app', categoryLabel: 'App', path: '/api/v1/apps/an1/dl' }
+  { id: 'an1-dl', name: 'AN1 · Direct DL', category: 'app', categoryLabel: 'App', path: '/api/v1/apps/an1/dl' },
+  { id: 'ai-tts', name: 'Apex AI · Text to Speech', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/ai/tts' }
 ];
 
 // ══════════════════════════════════════════════════════════════
