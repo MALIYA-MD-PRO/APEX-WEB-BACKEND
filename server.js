@@ -35,44 +35,27 @@ const globalLimiter = rateLimit({
 app.use("/api/", globalLimiter);
 
 // ══════════════════════════════════════════════════════════════
-// DARKNESS SECURITY ENGINE
+// CLOUDFLARE TURNSTILE VERIFICATION
 // ══════════════════════════════════════════════════════════════
-const darknessChallenges = new Map();
-const darknessTokens = new Map();
-
-app.get("/api/auth/darkness-challenge", (req, res) => {
-  const nonce = crypto.randomBytes(16).toString("hex");
-  const difficulty = "00000"; 
-  darknessChallenges.set(nonce, { difficulty, createdAt: Date.now() });
-  for (let [key, val] of darknessChallenges.entries()) {
-    if (Date.now() - val.createdAt > 300000) darknessChallenges.delete(key);
-  }
-  res.json({ nonce, difficulty });
-});
-
-app.post("/api/auth/darkness-verify", (req, res) => {
+async function verifyTurnstile(token, ip) {
   try {
-    const { nonce, solution, fingerprint } = req.body;
-    const challenge = darknessChallenges.get(nonce);
-    if (!challenge) return res.status(404).send("Not Found");
-    darknessChallenges.delete(nonce);
+    const formData = new URLSearchParams();
+    formData.append('secret', process.env.TURNSTILE_SECRET_KEY);
+    formData.append('response', token);
+    if (ip) formData.append('remoteip', ip);
 
-    const fp = fingerprint || {};
-    const isBot = fp.webdriver === true; 
-
-    if (isBot) {
-      console.warn("[Darkness] 🚫 Headless Browser Blocked:", fp);
-      return res.status(404).send("Not Found");
-    }
-
-    const hash = crypto.createHash("sha256").update(nonce + solution).digest("hex");
-    if (!hash.startsWith(challenge.difficulty)) return res.status(404).send("Not Found");
-
-    const darknessToken = crypto.randomBytes(32).toString("hex");
-    darknessTokens.set(darknessToken, Date.now() + 2 * 24 * 60 * 60 * 1000);
-    res.json({ success: true, darknessToken });
-  } catch (e) { res.status(404).send("Not Found"); }
-});
+    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body: formData,
+    });
+    
+    const outcome = await result.json();
+    return outcome.success;
+  } catch (error) {
+    console.error("[Turnstile Verify Error]:", error.message);
+    return false;
+  }
+}
 
 // ─── Brevo API Email Sender ───
 async function sendVerificationEmail(user, code) {
@@ -192,21 +175,25 @@ app.post("/api/auth/verify-code", async (req, res) => {
   }
 });
 
-// 🔥 LOGIN ROUTE (Verify Check එක අයින් කරලා තියෙන්නේ)
+// 🔥 LOGIN ROUTE (Cloudflare Turnstile Verify)
 app.post("/api/auth/login", async (req, res) => {
   try {
-    const { email, password, darknessToken } = req.body;
+    const { email, password, turnstileToken } = req.body;
     console.log(`[Login] Attempt: ${email}`);
 
-    if (!darknessToken || !darknessTokens.has(darknessToken)) {
-      console.log("[Login] ❌ Invalid Darkness Token");
-      return res.status(404).send("Not Found"); 
-    }
-    if (darknessTokens.get(darknessToken) < Date.now()) {
-      darknessTokens.delete(darknessToken);
-      return res.status(404).send("Not Found");
+    // Cloudflare Turnstile Check
+    if (!turnstileToken) {
+      console.log("[Login] ❌ Turnstile token missing");
+      return res.status(400).json({ success: false, error: "Security check missing. Please refresh." }); 
     }
 
+    const isHuman = await verifyTurnstile(turnstileToken, req.ip);
+    if (!isHuman) {
+      console.log("[Login] ❌ Turnstile validation failed");
+      return res.status(403).json({ success: false, error: "Security check failed. Are you a robot?" }); 
+    }
+
+    // Normal Auth
     if (!email || !password) return res.status(400).json({ success: false, error: "Email and password required" });
     const user = await User.findOne({ email: email.toLowerCase() });
     
@@ -216,7 +203,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     if (user.authMethod === "email") {
-      // 🔥 "Please verify your email" කියන කොටස මෙතනින් අයින් කළා. පාස්වර්ඩ් එක විතරයි චෙක් කරන්නේ.
+      // Verify Email Check එක මෙතනින් අයින් කරලා තියෙනවා (Register වෙද්දී විතරයි)
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         console.log("[Login] ❌ Incorrect password");
