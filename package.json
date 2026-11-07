@@ -17,6 +17,6 @@
     "yt-search": "^2.11.1",
     "got-scraping": "latest",
     "bcryptjs": "latest",
-    "dotenv": "latest"
+    "nodemailer": "latest"
   }
 }
