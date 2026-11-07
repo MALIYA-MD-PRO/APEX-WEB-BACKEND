@@ -58,7 +58,6 @@ app.post("/api/auth/darkness-verify", (req, res) => {
     darknessChallenges.delete(nonce);
 
     const fp = fingerprint || {};
-    // Strict block removed, only blocking actual headless browsers
     const isBot = fp.webdriver === true; 
 
     if (isBot) {
@@ -193,6 +192,7 @@ app.post("/api/auth/verify-code", async (req, res) => {
   }
 });
 
+// 🔥 LOGIN ROUTE (Verify Check එක අයින් කරලා තියෙන්නේ)
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password, darknessToken } = req.body;
@@ -216,10 +216,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     if (user.authMethod === "email") {
-      if (!user.isVerified) {
-        console.log("[Login] ❌ Email not verified");
-        return res.status(403).json({ success: false, error: "Please verify your email address first. Check your inbox." });
-      }
+      // 🔥 "Please verify your email" කියන කොටස මෙතනින් අයින් කළා. පාස්වර්ඩ් එක විතරයි චෙක් කරන්නේ.
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         console.log("[Login] ❌ Incorrect password");
