@@ -7,7 +7,7 @@ const defaultHeaders = {
 };
 
 module.exports = {
-  name: "YTS Movies Search",
+  name: "YTS Search",
   category: "movie",
   method: "GET",
   path: "/api/v1/movies/yts/search",
@@ -38,6 +38,15 @@ module.exports = {
         const poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null;
         const backdrop = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null;
 
+        // DL සඳහා අපගේ පද්ධතියට ආවේණික Encoded Token එකක් ජනනය කිරීම
+        const tokenPayload = JSON.stringify({
+          title,
+          year,
+          mode: item.media_type || mode,
+          id: item.id
+        });
+        const token = Buffer.from(tokenPayload).toString("base64url");
+
         return {
           id: item.id,
           title,
@@ -47,7 +56,10 @@ module.exports = {
           votes: item.vote_count || 0,
           overview: item.overview || "",
           poster,
-          backdrop
+          backdrop,
+          // DL එකට direct යැවිය හැකි ආවේණික token එක
+          token,
+          dlPath: `/api/v1/movies/yts/dl?token=${token}`
         };
       });
 
