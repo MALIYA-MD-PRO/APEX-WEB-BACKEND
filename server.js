@@ -203,7 +203,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     if (user.authMethod === "email") {
-      // Verify Email Check එක මෙතනින් අයින් කරලා තියෙනවා (Register වෙද්දී විතරයි)
+      // Verify Email Check එක මෙතනින් අයින් කරලා තියෙනවා
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         console.log("[Login] ❌ Incorrect password");
