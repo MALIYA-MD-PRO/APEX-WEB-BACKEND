@@ -14,29 +14,54 @@ function formatBytes(bytes) {
 }
 
 module.exports = {
-  name: "YTS Movies Torrents & Magnets DL Link",
+  name: "YTS Torrents & Magnets",
   category: "movie",
   method: "GET",
   path: "/api/v1/movies/yts/dl",
   handler: async (req, res) => {
     try {
-      const title = req.query.title || req.query.name;
-      const year = req.query.year || "";
-      const mode = req.query.mode || "movie";
+      let title = req.query.title || req.query.name || "";
+      let year = req.query.year || "";
+      let mode = req.query.mode || "movie";
+
+      // 1. Search එකෙන් ලැබුණු ආවේණික token එක ලබා දී ඇත්නම් එයින් දත්ත කියවීම
+      if (req.query.token) {
+        try {
+          const decoded = JSON.parse(Buffer.from(req.query.token, "base64url").toString("utf-8"));
+          if (decoded.title) title = decoded.title;
+          if (decoded.year) year = decoded.year;
+          if (decoded.mode) mode = decoded.mode;
+        } catch (e) {
+          return res.status(400).json({ success: false, error: "Invalid token provided" });
+        }
+      }
+
+      // Year parameter එකේ {year} වැනි placeholder හෝ වැරදි අගයන් ඇත්නම් පිරිසිදු කිරීම
+      if (year && (year.includes("{") || year.includes("api=") || isNaN(parseInt(year, 10)))) {
+        const matchYear = String(year).match(/\b(19\d\d|20\d\d)\b/);
+        year = matchYear ? matchYear[1] : "";
+      }
 
       if (!title) {
-        return res.status(400).json({ success: false, error: "Parameter 'title' is required" });
+        return res.status(400).json({ success: false, error: "Parameter 'token' or 'title' is required" });
       }
 
-      const torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=${encodeURIComponent(year.trim())}&quality=all`;
-      const response = await fetch(torrentsUrl, { headers: defaultHeaders });
+      // Primary Search: Title සහ Year සමඟ
+      let torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=${encodeURIComponent(year.trim())}&quality=all`;
+      let response = await fetch(torrentsUrl, { headers: defaultHeaders });
 
-      if (!response.ok) {
-        throw new Error(`Upstream returned HTTP ${response.status}`);
+      let data = response.ok ? await response.json() : { hits: [] };
+      let hits = data.hits || [];
+
+      // Secondary Fallback: Year එක නිසා torrents නොලැබුණහොත් title එකෙන් පමණක් සෙවීම
+      if (hits.length === 0 && year) {
+        const fallbackUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=&quality=all`;
+        const fbRes = await fetch(fallbackUrl, { headers: defaultHeaders });
+        if (fbRes.ok) {
+          const fbData = await fbRes.json();
+          hits = fbData.hits || [];
+        }
       }
-
-      const data = await response.json();
-      const hits = data.hits || [];
 
       const torrents = hits.map((t, index) => ({
         index: index + 1,
