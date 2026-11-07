@@ -8,7 +8,14 @@ const sslAgent = new https.Agent({
   secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
 });
 
-function decodeHtml(str = "") {
+const defaultHeaders = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  Connection: "keep-alive"
+};
+
+function decodeHtmlEntities(str = "") {
   return String(str)
     .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, "-")
     .replace(/&#8217;|&#8216;|&apos;/g, "'")
@@ -26,16 +33,17 @@ module.exports = {
   handler: async (req, res) => {
     try {
       const query = req.query.q;
-      if (!query) return res.status(400).json({ success: false, error: "Parameter 'q' is required" });
+      if (!query) {
+        return res.status(400).json({ success: false, error: "Query parameter 'q' is required" });
+      }
 
-      const searchUrl = `https://cinesubz.co/?s=${encodeURIComponent(query).replace(/%20/g, "+")}`;
+      const formattedQuery = encodeURIComponent(query.trim()).replace(/%20/g, "+");
+      const searchUrl = `https://cinesubz.co/?s=${formattedQuery}`;
+
       const response = await axios.get(searchUrl, {
         httpsAgent: sslAgent,
-        timeout: 12000,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36",
-          Referer: "https://cinesubz.co/"
-        }
+        timeout: 15000,
+        headers: { ...defaultHeaders, Referer: "https://cinesubz.co/" }
       });
 
       const html = String(response.data || "");
@@ -52,23 +60,25 @@ module.exports = {
 
         const url = linkMatch ? linkMatch[1].trim() : null;
         const rawTitle = (h3Match && h3Match[1]) || (linkMatch && linkMatch[2]) || "";
-        const title = decodeHtml(rawTitle);
+        const title = decodeHtmlEntities(rawTitle);
+        const image = imgMatch ? imgMatch[1].trim() : "https://github.com/MALIYA-MD-PRO/images/blob/main/Gemini_Generated_Image_ljlmxoljlmxoljlm%20(1).jpg?raw=true";
+        const imdb = imdbMatch ? imdbMatch[1].trim() : null;
+        const quality = qualityMatch ? qualityMatch[1].trim() : null;
 
         if (url && title && !seenUrls.has(url)) {
           seenUrls.add(url);
-          results.push({
-            title,
-            url,
-            image: imgMatch ? imgMatch[1].trim() : "",
-            rating: imdbMatch ? imdbMatch[1].trim() : null,
-            quality: qualityMatch ? qualityMatch[1].trim() : "HD"
-          });
+          results.push({ title, url, image, imdb, quality });
         }
       }
 
-      res.json({ success: true, query, total: results.length, results: results.slice(0, 15) });
+      return res.json({
+        success: true,
+        query,
+        total: results.length,
+        results: results.slice(0, 15)
+      });
     } catch (err) {
-      res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: "CineSubz search failed: " + err.message });
     }
   }
 };
