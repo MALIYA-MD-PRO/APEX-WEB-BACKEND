@@ -17,6 +17,9 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || "apex_jwt_secret_default";
 const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || "apex@admin2026";
 
+// ─── Proxy Fix for Railway ───
+app.set('trust proxy', 1);
+
 const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_CALLBACK_URL  = process.env.GOOGLE_CALLBACK_URL || `http://localhost:${PORT}/api/auth/google/callback`;
@@ -32,7 +35,7 @@ const globalLimiter = rateLimit({
 app.use("/api/", globalLimiter);
 
 // ══════════════════════════════════════════════════════════════
-// DARKNESS SECURITY ENGINE (Strict Block Removed)
+// DARKNESS SECURITY ENGINE
 // ══════════════════════════════════════════════════════════════
 const darknessChallenges = new Map();
 const darknessTokens = new Map();
@@ -55,7 +58,7 @@ app.post("/api/auth/darkness-verify", (req, res) => {
     darknessChallenges.delete(nonce);
 
     const fp = fingerprint || {};
-    // 🔥 VPN / AdBlocker Block එක අයින් කළා. දැන් බලන්නේ ඇත්තටම Headless ද කියලා විතරයි
+    // Strict block removed, only blocking actual headless browsers
     const isBot = fp.webdriver === true; 
 
     if (isBot) {
@@ -72,10 +75,10 @@ app.post("/api/auth/darkness-verify", (req, res) => {
   } catch (e) { res.status(404).send("Not Found"); }
 });
 
-// ─── Brevo API Email Sender (100% Free, Railway blocks bypass) ───
+// ─── Brevo API Email Sender ───
 async function sendVerificationEmail(user, code) {
   const emailPayload = {
-    sender: { name: "Apex API", email: process.env.SENDER_EMAIL || "no-reply@apex.com" },
+    sender: { name: "Apex API", email: process.env.SENDER_EMAIL },
     to: [{ email: user.email }],
     subject: `${code} is your Apex API Verification Code`,
     htmlContent: `
@@ -100,8 +103,11 @@ async function sendVerificationEmail(user, code) {
       body: JSON.stringify(emailPayload)
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.message || "Brevo API Error");
-    console.log(`[Email Sent] Code to ${user.email}`);
+    if (!res.ok) {
+      console.error(`[Email Error] Brevo API rejected:`, data);
+      throw new Error(data.message || "Brevo API Error");
+    }
+    console.log(`[Email Sent] ✅ Code to ${user.email}`);
   } catch (error) {
     console.error(`[Email Error] Failed to send to ${user.email}:`, error.message);
   }
@@ -193,6 +199,7 @@ app.post("/api/auth/login", async (req, res) => {
     console.log(`[Login] Attempt: ${email}`);
 
     if (!darknessToken || !darknessTokens.has(darknessToken)) {
+      console.log("[Login] ❌ Invalid Darkness Token");
       return res.status(404).send("Not Found"); 
     }
     if (darknessTokens.get(darknessToken) < Date.now()) {
@@ -202,12 +209,22 @@ app.post("/api/auth/login", async (req, res) => {
 
     if (!email || !password) return res.status(400).json({ success: false, error: "Email and password required" });
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(401).json({ success: false, error: "Invalid credentials." });
+    
+    if (!user) {
+      console.log("[Login] ❌ User not found");
+      return res.status(401).json({ success: false, error: "Invalid email or password." });
+    }
 
     if (user.authMethod === "email") {
-      if (!user.isVerified) return res.status(403).json({ success: false, error: "Please verify your email address first." });
+      if (!user.isVerified) {
+        console.log("[Login] ❌ Email not verified");
+        return res.status(403).json({ success: false, error: "Please verify your email address first. Check your inbox." });
+      }
       const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return res.status(401).json({ success: false, error: "Invalid credentials." });
+      if (!isMatch) {
+        console.log("[Login] ❌ Incorrect password");
+        return res.status(401).json({ success: false, error: "Invalid email or password." });
+      }
     }
 
     const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: "30d" });
@@ -219,7 +236,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// (Google OAuth, Profile, Admin code ටික එහෙමම තියෙන්න දෙන්න)
+// (Google OAuth, Profile, Admin, Plugins code ටික එහෙමම තියෙන්න දෙන්න)
 app.get("/api/auth/google", (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.redirect(`${FRONTEND_URL}/login.html?error=server_config`);
   const params = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_CALLBACK_URL, response_type: "code", scope: "openid email profile", access_type: "offline", prompt: "select_account" });
