@@ -32,7 +32,7 @@ const globalLimiter = rateLimit({
 app.use("/api/", globalLimiter);
 
 // ══════════════════════════════════════════════════════════════
-// DARKNESS SECURITY ENGINE
+// DARKNESS SECURITY ENGINE (Strict Block Removed)
 // ══════════════════════════════════════════════════════════════
 const darknessChallenges = new Map();
 const darknessTokens = new Map();
@@ -55,10 +55,11 @@ app.post("/api/auth/darkness-verify", (req, res) => {
     darknessChallenges.delete(nonce);
 
     const fp = fingerprint || {};
-    const isBot = fp.webdriver === true || fp.timeTaken < 200; 
+    // 🔥 VPN / AdBlocker Block එක අයින් කළා. දැන් බලන්නේ ඇත්තටම Headless ද කියලා විතරයි
+    const isBot = fp.webdriver === true; 
 
     if (isBot) {
-      console.warn("[Darkness] 🚫 Bot Blocked:", fp);
+      console.warn("[Darkness] 🚫 Headless Browser Blocked:", fp);
       return res.status(404).send("Not Found");
     }
 
@@ -71,13 +72,13 @@ app.post("/api/auth/darkness-verify", (req, res) => {
   } catch (e) { res.status(404).send("Not Found"); }
 });
 
-// ─── Resend API Email Sender ───
+// ─── Brevo API Email Sender (100% Free, Railway blocks bypass) ───
 async function sendVerificationEmail(user, code) {
   const emailPayload = {
-    from: "Apex API <onboarding@resend.dev>", // Resend free tier allows this sender
-    to: [user.email],
+    sender: { name: "Apex API", email: process.env.SENDER_EMAIL || "no-reply@apex.com" },
+    to: [{ email: user.email }],
     subject: `${code} is your Apex API Verification Code`,
-    html: `
+    htmlContent: `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 30px; background: #f8fafc; border-radius: 16px; border: 1px solid #e2e8f0; text-align: center;">
         <h2 style="color: #0f172a; margin: 0 0 10px;">Verify your email</h2>
         <p style="color: #64748b; font-size: 14px; margin-bottom: 30px;">Welcome to Apex API, ${user.name}!<br>Use the code below to verify your account.</p>
@@ -90,16 +91,16 @@ async function sendVerificationEmail(user, code) {
   };
 
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`
+        "api-key": process.env.BREVO_API_KEY
       },
       body: JSON.stringify(emailPayload)
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.message || "Resend API Error");
+    if (!res.ok) throw new Error(data.message || "Brevo API Error");
     console.log(`[Email Sent] Code to ${user.email}`);
   } catch (error) {
     console.error(`[Email Error] Failed to send to ${user.email}:`, error.message);
@@ -218,9 +219,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// ==========================================
-// GOOGLE OAUTH
-// ==========================================
+// (Google OAuth, Profile, Admin code ටික එහෙමම තියෙන්න දෙන්න)
 app.get("/api/auth/google", (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) return res.redirect(`${FRONTEND_URL}/login.html?error=server_config`);
   const params = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: GOOGLE_CALLBACK_URL, response_type: "code", scope: "openid email profile", access_type: "offline", prompt: "select_account" });
@@ -263,7 +262,6 @@ app.get("/api/auth/google/callback", async (req, res) => {
   } catch (err) { res.redirect(`${FRONTEND_URL}/login.html?error=oauth_failed`); }
 });
 
-// (Profile & Admin code ටික එහෙමම තියෙන්න දෙන්න)
 app.get("/api/user/profile", validateApiKey, async (req, res) => {
   const user = req.user;
   res.json({ success: true, user: { name: user.name, email: user.email, userId: user._id, tier: user.tier, totalRequests: user.totalRequests, requestsToday: user.requestsToday, status: user.status, joined: user.createdAt.toLocaleDateString("en-US", { month: "short", year: "numeric" }), lastLogin: "Active Now", region: "Asia Pacific · sg-1", successRate: 99.4, avatar: user.avatar || null, authMethod: user.authMethod || "email" }, key: { value: user.apiKey, lastRegenerated: "Active" } });
