@@ -19,14 +19,20 @@ module.exports = {
   path: "/api/v1/media/yt/audio",
   handler: async (req, res) => {
     try {
-      const query = req.query.q;
-      if (!query) return res.status(400).json({ success: false, error: "Parameter 'q' is required" });
+      const query = req.query.q || req.query.url;
+      if (!query) return res.status(400).json({ success: false, error: "Parameter 'q' or 'url' is required" });
 
-      let targetUrl = query;
-      if (!/(youtube\.com|youtu\.be)/i.test(query)) {
-        const s = await yts(query);
-        if (!s?.videos?.length) return res.status(404).json({ success: false, error: "No video found" });
-        targetUrl = s.videos[0].url;
+      let targetUrl = query.trim();
+
+      // Video ID එකක් පමණක් දුන්නේ නම් සම්පූර්ණ URL එක සෑදීම
+      if (!targetUrl.startsWith("http")) {
+        if (/^[a-zA-Z0-9_-]{11}$/.test(targetUrl)) {
+          targetUrl = `https://www.youtube.com/watch?v=${targetUrl}`;
+        } else {
+          const s = await yts(targetUrl);
+          if (!s?.videos?.length) return res.status(404).json({ success: false, error: "No video found for query" });
+          targetUrl = s.videos[0].url;
+        }
       }
 
       const headers = {
@@ -55,6 +61,7 @@ module.exports = {
           success: true,
           title: decrypted.title,
           videoId: decrypted.id,
+          youtubeUrl: targetUrl,
           duration: decrypted.durationLabel,
           audioUrl: dlRes.data.data.downloadUrl,
           bitrate: "128kbps",
