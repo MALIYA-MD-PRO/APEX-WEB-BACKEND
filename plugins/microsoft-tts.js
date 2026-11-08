@@ -1,4 +1,16 @@
 const https = require("https");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+
+// ── Directory & Limits Configuration ─────────────────────────────────────────
+const TTS_TEMP_DIR = path.join(__dirname, "../temp/tts");
+if (!fs.existsSync(TTS_TEMP_DIR)) {
+  fs.mkdirSync(TTS_TEMP_DIR, { recursive: true });
+}
+
+const MAX_TOTAL_SIZE_BYTES = 150 * 1024 * 1024; // Max 150 MB Storage Guard
+const EXPIRE_TIME_MS = 20 * 60 * 1000;          // 20 Minutes Expiry
 
 const AVAILABLE_VOICES = [
   { id: "en-US-AriaNeural", name: "Aria", gender: "Female", lang: "English (US)", flag: "🇺🇸" },
@@ -12,7 +24,70 @@ const AVAILABLE_VOICES = [
   { id: "ta-IN-ValluvarNeural", name: "Valluvar", gender: "Male", lang: "Tamil (India)", flag: "🇮🇳" }
 ];
 
-// Direct Microsoft Edge REST Endpoint Synthesis
+// ── Storage Capacity & Expiry Cleaners ─────────────────────────────────────────
+function getDirectorySizeBytes() {
+  try {
+    const files = fs.readdirSync(TTS_TEMP_DIR);
+    let totalSize = 0;
+    for (const file of files) {
+      const filePath = path.join(TTS_TEMP_DIR, file);
+      try {
+        const stats = fs.statSync(filePath);
+        totalSize += stats.size;
+      } catch (_) {}
+    }
+    return totalSize;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function ensureStorageLimit(incomingBytes = 0) {
+  try {
+    let currentTotal = getDirectorySizeBytes();
+    if (currentTotal + incomingBytes <= MAX_TOTAL_SIZE_BYTES) return;
+
+    const files = fs.readdirSync(TTS_TEMP_DIR)
+      .map((f) => {
+        const filePath = path.join(TTS_TEMP_DIR, f);
+        try {
+          return { name: f, path: filePath, ...fs.statSync(filePath) };
+        } catch (_) {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+    for (const file of files) {
+      try {
+        fs.unlinkSync(file.path);
+        currentTotal -= file.size;
+        if (currentTotal + incomingBytes <= MAX_TOTAL_SIZE_BYTES) break;
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error("[TTS Cleaner Error]:", err.message);
+  }
+}
+
+setInterval(() => {
+  try {
+    const files = fs.readdirSync(TTS_TEMP_DIR);
+    const now = Date.now();
+    for (const file of files) {
+      const filePath = path.join(TTS_TEMP_DIR, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtimeMs > EXPIRE_TIME_MS) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+}, 2 * 60 * 1000);
+
+// ── Microsoft Edge Speech Engine ─────────────────────────────────────────────
 function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
   return new Promise((resolve, reject) => {
     const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
@@ -30,7 +105,7 @@ function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         "Content-Length": Buffer.byteLength(ssml)
       },
-      timeout: 10000
+      timeout: 12000
     };
 
     const req = https.request(options, (res) => {
@@ -41,10 +116,10 @@ function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
         return;
       }
 
-      // Fallback: Google Translate TTS audio buffer if Microsoft blocks direct IP
+      // Fallback Engine
       const fallbackLang = voice.startsWith("si") ? "si" : voice.startsWith("ta") ? "ta" : "en";
       const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${fallbackLang}&client=tw-ob`;
-      
+
       https.get(fallbackUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (fbRes) => {
         if (fbRes.statusCode === 200) {
           const fbChunks = [];
@@ -59,7 +134,7 @@ function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
     req.on("error", (err) => reject(err));
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error("Request timed out"));
+      reject(new Error("Synthesis request timed out"));
     });
 
     req.write(ssml);
@@ -67,6 +142,26 @@ function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
   });
 }
 
+function saveTempAudio(buffer, voiceId) {
+  ensureStorageLimit(buffer.length);
+  const randomId = crypto.randomBytes(6).toString("hex");
+  const fileName = `apex_tts_${voiceId}_${Date.now()}_${randomId}.mp3`;
+  const fullPath = path.join(TTS_TEMP_DIR, fileName);
+
+  fs.writeFileSync(fullPath, buffer);
+
+  setTimeout(() => {
+    try {
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
+    } catch (_) {}
+  }, EXPIRE_TIME_MS);
+
+  return fileName;
+}
+
+// ── Plugin Definition ────────────────────────────────────────────────────────
 module.exports = {
   name: "Microsoft Neural TTS Multi-Voice",
   category: "media",
@@ -74,6 +169,30 @@ module.exports = {
   path: "/api/v1/media/microsoft/tts",
   handler: async (req, res) => {
     try {
+      // 1. Direct Auto-Download Endpoint (?download=filename හෝ ?token=filename)
+      const downloadTarget = req.query.download || req.query.token || req.query.file;
+      if (downloadTarget) {
+        const targetFile = path.basename(downloadTarget);
+        const filePath = path.join(TTS_TEMP_DIR, targetFile);
+
+        if (!fs.existsSync(filePath)) {
+          return res.status(404).json({
+            success: false,
+            error: "The download link has expired or the file no longer exists (20-minute limit reached)."
+          });
+        }
+
+        const stat = fs.statSync(filePath);
+
+        // Force Auto-Download Headers
+        res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader("Content-Disposition", `attachment; filename="${targetFile}"`);
+        res.setHeader("Content-Length", stat.size);
+        res.setHeader("Cache-Control", "no-cache");
+
+        return fs.createReadStream(filePath).pipe(res);
+      }
+
       const text = req.query.text || req.query.prompt || req.query.q;
       const singleVoice = req.query.voice;
       const pitch = req.query.pitch || "+0Hz";
@@ -87,42 +206,78 @@ module.exports = {
         });
       }
 
-      // 1. Direct playable MP3 audio stream
-      if (singleVoice && isStream) {
-        const audioBuffer = await synthesizeEdgeRest(text.trim(), singleVoice, pitch, rate);
-        res.setHeader("Content-Type", "audio/mpeg");
-        res.setHeader("Content-Length", audioBuffer.length);
-        res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        return res.end(audioBuffer);
-      }
-
-      // 2. All Voices Multi-Option Listing
-      const currentHost = req.protocol + "://" + req.get("host");
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+      const host = req.get("host");
+      const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      const voiceOptions = AVAILABLE_VOICES.map((v) => {
-        const streamUrl = `${currentHost}/api/v1/media/microsoft/tts?text=${encodeURIComponent(text.trim())}&voice=${v.id}&pitch=${encodeURIComponent(pitch)}&rate=${encodeURIComponent(rate)}&stream=true${apiKeyParam}`;
-        return {
-          id: v.id,
-          name: v.name,
-          gender: v.gender,
-          language: v.lang,
-          flag: v.flag,
-          audioUrl: streamUrl
-        };
+      // 2. තනි Voice එකක් සඳහා auto download link සැකසීම
+      if (singleVoice) {
+        const audioBuffer = await synthesizeEdgeRest(text.trim(), singleVoice, pitch, rate);
+
+        if (isStream) {
+          res.setHeader("Content-Type", "audio/mpeg");
+          res.setHeader("Content-Length", audioBuffer.length);
+          res.setHeader("Accept-Ranges", "bytes");
+          return res.end(audioBuffer);
+        }
+
+        const fileName = saveTempAudio(audioBuffer, singleVoice);
+        // Link එකට ගිය සැණින් Auto Download වේ
+        const autoDownloadUrl = `${currentHost}/api/v1/media/microsoft/tts?download=${fileName}${apiKeyParam}`;
+
+        return res.json({
+          success: true,
+          voice: singleVoice,
+          text: text.trim(),
+          fileSize: `${(audioBuffer.length / 1024).toFixed(1)} KB`,
+          downloadUrl: autoDownloadUrl,
+          expiresIn: "20 minutes"
+        });
+      }
+
+      // 3. All Voices — Multi Auto-Download Links
+      const voicePromises = AVAILABLE_VOICES.map(async (v) => {
+        try {
+          const audioBuffer = await synthesizeEdgeRest(text.trim(), v.id, pitch, rate);
+          const fileName = saveTempAudio(audioBuffer, v.id);
+          const autoDownloadUrl = `${currentHost}/api/v1/media/microsoft/tts?download=${fileName}${apiKeyParam}`;
+
+          return {
+            id: v.id,
+            name: v.name,
+            gender: v.gender,
+            language: v.lang,
+            flag: v.flag,
+            size: `${(audioBuffer.length / 1024).toFixed(1)} KB`,
+            autoDownloadUrl
+          };
+        } catch (voiceErr) {
+          return {
+            id: v.id,
+            name: v.name,
+            gender: v.gender,
+            language: v.lang,
+            flag: v.flag,
+            error: "Failed to generate audio"
+          };
+        }
       });
+
+      const voicesResult = await Promise.all(voicePromises);
 
       return res.json({
         success: true,
         text: text.trim(),
-        totalVoices: voiceOptions.length,
-        voices: voiceOptions
+        expiresIn: "20 minutes",
+        totalVoices: voicesResult.length,
+        voices: voicesResult
       });
+
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "Microsoft Edge TTS Synthesis Failed: " + err.message
+        error: "Microsoft Edge TTS Processing Failed: " + err.message
       });
     }
   }
