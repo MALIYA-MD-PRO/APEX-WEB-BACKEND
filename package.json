@@ -17,6 +17,7 @@
     "yt-search": "^2.11.1",
     "got-scraping": "latest",
     "bcryptjs": "latest",
-    "nodemailer": "latest"
+    "nodemailer": "latest",
+    "ms-edge-tts": "latest"
   }
 }
