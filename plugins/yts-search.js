@@ -38,14 +38,8 @@ module.exports = {
         const poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null;
         const backdrop = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null;
 
-        // DL සඳහා අපගේ පද්ධතියට ආවේණික Encoded Token එකක් ජනනය කිරීම
-        const tokenPayload = JSON.stringify({
-          title,
-          year,
-          mode: item.media_type || mode,
-          id: item.id
-        });
-        const token = Buffer.from(tokenPayload).toString("base64url");
+        // ඔබ ඉල්ලූ ආකාරයේ ආවේණික apex link එක
+        const apexUrl = `https://apex-api-pro.vercel.app/yts?id=${item.id}`;
 
         return {
           id: item.id,
@@ -57,9 +51,9 @@ module.exports = {
           overview: item.overview || "",
           poster,
           backdrop,
-          // DL එකට direct යැවිය හැකි ආවේණික token එක
-          token,
-          dlPath: `/api/v1/movies/yts/dl?token=${token}`
+          // DL endpoint එකට කෙලින්ම දැමිය හැකි Link එක
+          apexUrl,
+          dlEndpoint: `/api/v1/movies/yts/dl?url=${encodeURIComponent(apexUrl)}`
         };
       });
 
