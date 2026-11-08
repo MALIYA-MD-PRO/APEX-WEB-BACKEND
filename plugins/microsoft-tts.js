@@ -1,3 +1,5 @@
+const https = require("https");
+
 const AVAILABLE_VOICES = [
   { id: "en-US-AriaNeural", name: "Aria", gender: "Female", lang: "English (US)", flag: "🇺🇸" },
   { id: "en-US-GuyNeural", name: "Guy", gender: "Male", lang: "English (US)", flag: "🇺🇸" },
@@ -10,39 +12,59 @@ const AVAILABLE_VOICES = [
   { id: "ta-IN-ValluvarNeural", name: "Valluvar", gender: "Male", lang: "Tamil (India)", flag: "🇮🇳" }
 ];
 
-async function fetchEdgeAudio(text, voice, pitch = "+0Hz", rate = "+0%") {
-  // Method 1: Edge Audio Upstream REST Synthesizer
-  const upstreamUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(
-    `https://tts.msh.host/api/tts?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`
-  )}`;
+// Direct Microsoft Edge REST Endpoint Synthesis
+function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
+  return new Promise((resolve, reject) => {
+    const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
+      `<voice name='${voice}'>` +
+      `<prosody pitch='${pitch}' rate='${rate}'>${text}</prosody>` +
+      `</voice></speak>`;
 
-  try {
-    const res = await fetch(upstreamUrl, {
+    const options = {
+      hostname: "speech.platform.bing.com",
+      path: "/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EA65408183E4CBA214552F60",
+      method: "POST",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+        "Content-Length": Buffer.byteLength(ssml)
+      },
+      timeout: 10000
+    };
+
+    const req = https.request(options, (res) => {
+      if (res.statusCode === 200) {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve(Buffer.concat(chunks)));
+        return;
       }
+
+      // Fallback: Google Translate TTS audio buffer if Microsoft blocks direct IP
+      const fallbackLang = voice.startsWith("si") ? "si" : voice.startsWith("ta") ? "ta" : "en";
+      const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${fallbackLang}&client=tw-ob`;
+      
+      https.get(fallbackUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (fbRes) => {
+        if (fbRes.statusCode === 200) {
+          const fbChunks = [];
+          fbRes.on("data", (chunk) => fbChunks.push(chunk));
+          fbRes.on("end", () => resolve(Buffer.concat(fbChunks)));
+        } else {
+          reject(new Error(`Synthesis returned status ${res.statusCode}`));
+        }
+      }).on("error", reject);
     });
 
-    if (res.ok) {
-      const buffer = await res.arrayBuffer();
-      if (buffer.byteLength > 100) return Buffer.from(buffer);
-    }
-  } catch (e) {}
+    req.on("error", (err) => reject(err));
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timed out"));
+    });
 
-  // Method 2: Direct High-Quality Neural Mirror
-  const directEndpoint = `https://edge-tts.vercel.app/api/tts?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}`;
-  const res2 = await fetch(directEndpoint, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    }
+    req.write(ssml);
+    req.end();
   });
-
-  if (res2.ok) {
-    const buffer = await res2.arrayBuffer();
-    return Buffer.from(buffer);
-  }
-
-  throw new Error("Upstream synthesis gateway temporarily unavailable");
 }
 
 module.exports = {
@@ -65,14 +87,14 @@ module.exports = {
         });
       }
 
-      // 1. Direct Voice Stream
+      // 1. Direct playable MP3 audio stream
       if (singleVoice && isStream) {
-        const audioBuffer = await fetchEdgeAudio(text.trim(), singleVoice, pitch, rate);
+        const audioBuffer = await synthesizeEdgeRest(text.trim(), singleVoice, pitch, rate);
         res.setHeader("Content-Type", "audio/mpeg");
         res.setHeader("Content-Length", audioBuffer.length);
         res.setHeader("Accept-Ranges", "bytes");
         res.setHeader("Cache-Control", "public, max-age=86400");
-        return res.send(audioBuffer);
+        return res.end(audioBuffer);
       }
 
       // 2. All Voices Multi-Option Listing
