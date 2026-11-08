@@ -18,6 +18,6 @@
     "got-scraping": "latest",
     "bcryptjs": "latest",
     "nodemailer": "latest",
-    "ms-edge-tts": "latest"
+    "ws": "latest"
   }
 }
