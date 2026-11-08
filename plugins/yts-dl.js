@@ -20,40 +20,60 @@ module.exports = {
   path: "/api/v1/movies/yts/dl",
   handler: async (req, res) => {
     try {
+      const inputUrl = req.query.url || "";
+      let movieId = req.query.id || "";
       let title = req.query.title || req.query.name || "";
       let year = req.query.year || "";
       let mode = req.query.mode || "movie";
 
-      // 1. Search එකෙන් ලැබුණු ආවේණික token එක ලබා දී ඇත්නම් එයින් දත්ත කියවීම
-      if (req.query.token) {
-        try {
-          const decoded = JSON.parse(Buffer.from(req.query.token, "base64url").toString("utf-8"));
-          if (decoded.title) title = decoded.title;
-          if (decoded.year) year = decoded.year;
-          if (decoded.mode) mode = decoded.mode;
-        } catch (e) {
-          return res.status(400).json({ success: false, error: "Invalid token provided" });
+      // 1. URL එකක් ලබා දී ඇත්නම් එයින් Movie ID එක Extract කරගැනීම
+      if (inputUrl) {
+        // ?id=12345 හෝ &=id12345 හෝ id=12345 ආදී formats සියල්ලටම support කරයි
+        const idMatch = inputUrl.match(/id[=:]?(\d+)/i);
+        if (idMatch) {
+          movieId = idMatch[1];
         }
       }
 
-      // Year parameter එකේ {year} වැනි placeholder හෝ වැරදි අගයන් ඇත්නම් පිරිසිදු කිරීම
+      // 2. Movie ID එක තිබේ නම් TMDB/YTS API එකෙන් Title සහ Year නිවැරදිව සොයා ගැනීම
+      if (movieId && (!title || !year)) {
+        try {
+          const detailUrl = `${BASE_URL}/?api=detail&mode=${encodeURIComponent(mode)}&id=${encodeURIComponent(movieId)}`;
+          const detailRes = await fetch(detailUrl, { headers: defaultHeaders });
+          if (detailRes.ok) {
+            const detailData = await detailRes.json();
+            if (detailData && (detailData.title || detailData.name)) {
+              title = detailData.title || detailData.name;
+              const date = detailData.release_date || detailData.first_air_date || "";
+              year = date ? date.slice(0, 4) : "";
+            }
+          }
+        } catch (detailErr) {
+          console.warn("[YTS Detail Fetch Skipped]:", detailErr.message);
+        }
+      }
+
+      // Year parameter එකේ {year} වැනි placeholders ඇත්නම් ඉවත් කිරීම
       if (year && (year.includes("{") || year.includes("api=") || isNaN(parseInt(year, 10)))) {
         const matchYear = String(year).match(/\b(19\d\d|20\d\d)\b/);
         year = matchYear ? matchYear[1] : "";
       }
 
       if (!title) {
-        return res.status(400).json({ success: false, error: "Parameter 'token' or 'title' is required" });
+        return res.status(400).json({ 
+          success: false, 
+          error: "Could not resolve movie. Please pass 'url' (e.g. https://apex-api-pro.vercel.app/yts?id=12345), 'id', or 'title'." 
+        });
       }
 
-      // Primary Search: Title සහ Year සමඟ
+      // 3. Primary Torrent Fetch: Title සහ Year සමඟ
       let torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=${encodeURIComponent(year.trim())}&quality=all`;
       let response = await fetch(torrentsUrl, { headers: defaultHeaders });
 
       let data = response.ok ? await response.json() : { hits: [] };
       let hits = data.hits || [];
 
-      // Secondary Fallback: Year එක නිසා torrents නොලැබුණහොත් title එකෙන් පමණක් සෙවීම
+      // 4. Secondary Fallback: Year එක නිසා torrents නොලැබුණහොත් Title එකෙන් පමණක් සෙවීම
       if (hits.length === 0 && year) {
         const fallbackUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=&quality=all`;
         const fbRes = await fetch(fallbackUrl, { headers: defaultHeaders });
@@ -79,6 +99,7 @@ module.exports = {
         success: true,
         title,
         year: year || null,
+        movieId: movieId || null,
         totalTorrents: torrents.length,
         torrents
       });
