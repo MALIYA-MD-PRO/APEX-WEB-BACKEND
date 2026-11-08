@@ -73,7 +73,8 @@ const SYSTEM_ENDPOINTS = [
   { id: 'ai-tts', name: 'Apex AI · Text to Speech', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/ai/tts' },
   { id: 'facebook-dl', name: 'Facebook · Video DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/facebook/dl' },
   { id: 'mediafire-dl', name: 'MediaFire · Direct DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/mediafire/dl' },
-  { id: 'microsoft-tts', name: 'Microsoft · Neural TTS', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/microsoft/tts' }
+  { id: 'microsoft-tts', name: 'Microsoft · Neural TTS', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/microsoft/tts' },
+  { id: 'chat-ubi', name: 'Universal Basic Intelligence (ch.at)', category: 'ai', categoryLabel: 'AI', path: '/api/v1/ai/chat/ubi' }
 ];
 
 // ══════════════════════════════════════════════════════════════
