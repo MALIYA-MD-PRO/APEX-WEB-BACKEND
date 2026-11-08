@@ -2,8 +2,16 @@ const axios = require("axios");
 
 const CHAT_BASE = "https://ch.at";
 
+// 'Q:' සහ 'A:' ආදී අනවශ්‍ය tags ඉවත් කර පිරිසිදු පිළිතුර ලබාගැනීමේ helper ශ්‍රිතය
+function cleanAiReply(rawText = "") {
+  return String(rawText || "")
+    .replace(/^Q:\s*[\s\S]*?\nA:\s*/i, "") // මුලින් එන Q: ... A: කොටස ඉවත් කිරීම
+    .replace(/^A:\s*/i, "")                // තනිව එන 'A:' prefix එක ඉවත් කිරීම
+    .trim();
+}
+
 module.exports = {
-  name: "Universal Basic Intelligence (ch.at)",
+  name: "Gemini Mini ",
   category: "ai",
   method: "GET",
   path: "/api/v1/ai/chat/ubi",
@@ -31,12 +39,13 @@ module.exports = {
         });
 
         const rawReply = typeof response.data === "string" ? response.data.trim() : JSON.stringify(response.data);
+        const finalReply = cleanAiReply(rawReply);
 
         return res.json({
           success: true,
           query: query.trim(),
-          reply: rawReply,
-          provider: "ch.at (UBI)"
+          reply: finalReply,
+          provider: "Gemini Mini"
         });
       }
 
@@ -68,17 +77,19 @@ module.exports = {
         parsedReply = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
       }
 
+      const finalReply = cleanAiReply(parsedReply);
+
       return res.json({
         success: true,
         query: query || null,
-        reply: parsedReply,
-        provider: "ch.at (UBI)"
+        reply: finalReply,
+        provider: "Gemini Mini"
       });
 
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "ch.at UBI Query Failed: " + (err.response?.data || err.message)
+        error: "Gemini Mini Query Failed: " + (err.response?.data || err.message)
       });
     }
   }
