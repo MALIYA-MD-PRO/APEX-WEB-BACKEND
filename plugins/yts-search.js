@@ -38,8 +38,8 @@ module.exports = {
         const poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null;
         const backdrop = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null;
 
-        // ඔබ ඉල්ලූ ආකාරයේ ආවේණික apex link එක
-        const apexUrl = `https://apex-api-pro.vercel.app/yts?id=${item.id}`;
+        // Movie Title එකෙන් ආවේණික Apex Landing Link එක සෑදීම
+        const apexUrl = `https://apex-api-pro.vercel.app/yts?title=${encodeURIComponent(title)}`;
 
         return {
           id: item.id,
@@ -51,7 +51,7 @@ module.exports = {
           overview: item.overview || "",
           poster,
           backdrop,
-          // DL endpoint එකට කෙලින්ම දැමිය හැකි Link එක
+          // DL endpoint එකට ලබා දිය හැකි URL එක
           apexUrl,
           dlEndpoint: `/api/v1/movies/yts/dl?url=${encodeURIComponent(apexUrl)}`
         };
