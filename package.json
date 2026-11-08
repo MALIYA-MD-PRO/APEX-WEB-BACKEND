@@ -18,6 +18,7 @@
     "got-scraping": "latest",
     "bcryptjs": "latest",
     "nodemailer": "latest",
-    "ws": "latest"
+    "ws": "latest",
+    "https": "latest"
   }
 }
