@@ -20,39 +20,49 @@ module.exports = {
   path: "/api/v1/movies/yts/dl",
   handler: async (req, res) => {
     try {
-      let rawInput = req.query.url || req.query.title || req.query.name || "";
+      // 1. ලැබෙන ඕනෑම query parameter එකකින් input එක ලබා ගැනීම
       let movieId = req.query.id || "";
+      let rawUrl = req.query.url || "";
+      let title = req.query.title || req.query.name || req.query.q || "";
       let year = req.query.year || "";
       let mode = req.query.mode || "movie";
-      let title = "";
 
-      // 1. Input එකේ URL එකක් (https://...) හෝ id අඩංගුදැයි බැලීම
-      if (rawInput.includes("http://") || rawInput.includes("https://") || rawInput.includes("id=")) {
-        const idMatch = rawInput.match(/id[=:]?(\d+)/i);
-        if (idMatch) {
-          movieId = idMatch[1];
+      // Original URL එකෙන් හෝ query parameters වලින් Movie ID එක extract කර ගැනීම
+      const fullOriginalUrl = req.originalUrl || "";
+      
+      if (!movieId) {
+        // req.originalUrl එකේ id= හෝ id< ඇත්නම් එය සෙවීම
+        const match = fullOriginalUrl.match(/id[=:<%3D]?\s*(\d+)/i) || rawUrl.match(/id[=:<%3D]?\s*(\d+)/i);
+        if (match) {
+          movieId = match[1];
+        } else if (rawUrl && /^\d+$/.test(rawUrl.trim())) {
+          movieId = rawUrl.trim();
+        } else if (title && /^\d+$/.test(title.trim())) {
+          movieId = title.trim();
+          title = "";
         }
-      } else if (!movieId && /^\d+$/.test(rawInput.trim())) {
-        // Input එක කෙලින්ම ID එකක් නම් (උදා: 969681)
-        movieId = rawInput.trim();
-      } else {
-        // URL එකක් නොවේ නම් එය සැබෑ චිත්‍රපට නම (Title) ලෙස ගැනීම
-        title = rawInput.trim();
       }
 
-      // 2. Movie ID එකෙන් සැබෑ Title සහ Year ලබා ගැනීම
+      // ID එකක් නැතිව raw URL එකක් හෝ title එකක් පමණක් ආවේ නම් title එක පිරිසිදු කිරීම
+      if (!movieId && !title && rawUrl && !rawUrl.startsWith("http")) {
+        title = rawUrl.trim();
+      }
+
+      // 2. Movie ID එකක් තිබේ නම් TMDB / YTS Detail API එකෙන් සැබෑ Title සහ Year ලබා ගැනීම
       if (movieId) {
         try {
           const detailUrl = `${BASE_URL}/?api=detail&mode=${encodeURIComponent(mode)}&id=${encodeURIComponent(movieId)}`;
           const detailRes = await fetch(detailUrl, { headers: defaultHeaders });
           if (detailRes.ok) {
             const detailData = await detailRes.json();
-            title = detailData.title || detailData.name || title;
-            const date = detailData.release_date || detailData.first_air_date || "";
-            if (date) year = date.slice(0, 4);
+            if (detailData) {
+              title = detailData.title || detailData.name || title;
+              const date = detailData.release_date || detailData.first_air_date || "";
+              if (date) year = date.slice(0, 4);
+            }
           }
         } catch (detailErr) {
-          console.warn("[YTS Detail Error]:", detailErr.message);
+          console.warn("[YTS Detail Fetch Error]:", detailErr.message);
         }
       }
 
@@ -62,6 +72,7 @@ module.exports = {
         year = matchYear ? matchYear[1] : "";
       }
 
+      // Title එක තවමත් සොයාගත නොහැකි නම් Error එකක් යැවීම
       if (!title) {
         return res.status(400).json({
           success: false,
@@ -69,13 +80,13 @@ module.exports = {
         });
       }
 
-      // 3. Primary Search: Title සහ Year සමඟ
+      // 3. Torrents සෙවීම (Title සහ Year සමඟ)
       let torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}&quality=all`;
       let response = await fetch(torrentsUrl, { headers: defaultHeaders });
       let data = response.ok ? await response.json() : { hits: [] };
       let hits = data.hits || [];
 
-      // 4. Fallback 1: Year එක නිසා ප්‍රතිඵල නොලැබුණහොත් Title පමණක් යොදා සෙවීම
+      // Fallback 1: Year එක නිසා torrents නොලැබුණහොත් Title එකෙන් පමණක් සෙවීම
       if (hits.length === 0 && year) {
         const fbUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title)}&year=&quality=all`;
         const fbRes = await fetch(fbUrl, { headers: defaultHeaders });
@@ -85,10 +96,10 @@ module.exports = {
         }
       }
 
-      // 5. Fallback 2: Title එකේ Colon (:) හෝ Subtitles ඇත්නම් (උදා: "Avatar: The Way of Water" -> "Avatar")
+      // Fallback 2: Title එකේ Colon (:) ඇත්නම් ප්‍රධාන නමෙන් සෙවීම (e.g. "Avatar: The Way of Water" -> "Avatar")
       if (hits.length === 0 && title.includes(":")) {
         const cleanTitle = title.split(":")[0].trim();
-        const fbUrl2 = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(cleanTitle)}&year=${encodeURIComponent(year)}&quality=all`;
+        const fbUrl2 = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(cleanTitle)}&year=&quality=all`;
         const fbRes2 = await fetch(fbUrl2, { headers: defaultHeaders });
         if (fbRes2.ok) {
           const fbData2 = await fbRes2.json();
