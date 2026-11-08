@@ -13,6 +13,41 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i];
 }
 
+// TMDB ID එකෙන් සැබෑ නම සහ වසර ලබා ගැනීමේ Helper function එක
+async function resolveDetailsFromId(id) {
+  try {
+    // 1. Upstream YTS Detail endpoint
+    const url1 = `${BASE_URL}/?api=detail&mode=movie&id=${id}`;
+    const res1 = await fetch(url1, { headers: defaultHeaders });
+    if (res1.ok) {
+      const data = await res1.json();
+      if (data && (data.title || data.name)) {
+        const title = data.title || data.name;
+        const date = data.release_date || data.first_air_date || "";
+        const year = date ? date.slice(0, 4) : "";
+        return { title, year };
+      }
+    }
+  } catch (e) {}
+
+  try {
+    // 2. Public TMDB Fallback Mirror (ID lookup සඳහා)
+    const tmdbUrl = `https://api.themoviedb.org/3/movie/${id}?api_key=15d2ade7c014e3e4a017e4130a67a554`;
+    const res2 = await fetch(tmdbUrl);
+    if (res2.ok) {
+      const data2 = await res2.json();
+      if (data2 && data2.title) {
+        return {
+          title: data2.title,
+          year: data2.release_date ? data2.release_date.slice(0, 4) : ""
+        };
+      }
+    }
+  } catch (e) {}
+
+  return null;
+}
+
 module.exports = {
   name: "YTS Torrents & Magnets",
   category: "movie",
@@ -20,59 +55,42 @@ module.exports = {
   path: "/api/v1/movies/yts/dl",
   handler: async (req, res) => {
     try {
-      // 1. ලැබෙන ඕනෑම query parameter එකකින් input එක ලබා ගැනීම
+      // 1. Query parameters හෝ Full Raw URL එකෙන් Movie ID එක හඳුනා ගැනීම
       let movieId = req.query.id || "";
-      let rawUrl = req.query.url || "";
-      let title = req.query.title || req.query.name || req.query.q || "";
+      let title = req.query.title || req.query.name || "";
       let year = req.query.year || "";
       let mode = req.query.mode || "movie";
 
-      // Original URL එකෙන් හෝ query parameters වලින් Movie ID එක extract කර ගැනීම
-      const fullOriginalUrl = req.originalUrl || "";
-      
+      // req.originalUrl එකේ හෝ query parameters වල අඩංගු URL එකෙන් id අගය සොයා ගැනීම
+      const rawFullUrl = req.originalUrl || "";
+      const urlParam = req.query.url || "";
+
       if (!movieId) {
-        // req.originalUrl එකේ id= හෝ id< ඇත්නම් එය සෙවීම
-        const match = fullOriginalUrl.match(/id[=:<%3D]?\s*(\d+)/i) || rawUrl.match(/id[=:<%3D]?\s*(\d+)/i);
-        if (match) {
-          movieId = match[1];
-        } else if (rawUrl && /^\d+$/.test(rawUrl.trim())) {
-          movieId = rawUrl.trim();
-        } else if (title && /^\d+$/.test(title.trim())) {
+        const idMatch = rawFullUrl.match(/id[=:<%3D]?\s*(\d+)/i) || urlParam.match(/id[=:<%3D]?\s*(\d+)/i);
+        if (idMatch) {
+          movieId = idMatch[1];
+        } else if (/^\d+$/.test(urlParam.trim())) {
+          movieId = urlParam.trim();
+        } else if (/^\d+$/.test(title.trim())) {
           movieId = title.trim();
           title = "";
         }
       }
 
-      // ID එකක් නැතිව raw URL එකක් හෝ title එකක් පමණක් ආවේ නම් title එක පිරිසිදු කිරීම
-      if (!movieId && !title && rawUrl && !rawUrl.startsWith("http")) {
-        title = rawUrl.trim();
-      }
-
-      // 2. Movie ID එකක් තිබේ නම් TMDB / YTS Detail API එකෙන් සැබෑ Title සහ Year ලබා ගැනීම
+      // 2. Movie ID එකෙන් නිශ්චිත Title සහ Year එක සොයා ගැනීම
       if (movieId) {
-        try {
-          const detailUrl = `${BASE_URL}/?api=detail&mode=${encodeURIComponent(mode)}&id=${encodeURIComponent(movieId)}`;
-          const detailRes = await fetch(detailUrl, { headers: defaultHeaders });
-          if (detailRes.ok) {
-            const detailData = await detailRes.json();
-            if (detailData) {
-              title = detailData.title || detailData.name || title;
-              const date = detailData.release_date || detailData.first_air_date || "";
-              if (date) year = date.slice(0, 4);
-            }
-          }
-        } catch (detailErr) {
-          console.warn("[YTS Detail Fetch Error]:", detailErr.message);
+        const resolved = await resolveDetailsFromId(movieId);
+        if (resolved) {
+          title = resolved.title;
+          if (!year && resolved.year) year = resolved.year;
         }
       }
 
-      // Year parameter එකේ {year} placeholders හෝ අක්‍රමිකතා පිරිසිදු කිරීම
-      if (year && (year.includes("{") || year.includes("api=") || isNaN(parseInt(year, 10)))) {
-        const matchYear = String(year).match(/\b(19\d\d|20\d\d)\b/);
-        year = matchYear ? matchYear[1] : "";
+      // Title එකට URL එකක් ආවා නම් එය පිරිසිදු කිරීම
+      if (!title && urlParam && !urlParam.startsWith("http")) {
+        title = urlParam.trim();
       }
 
-      // Title එක තවමත් සොයාගත නොහැකි නම් Error එකක් යැවීම
       if (!title) {
         return res.status(400).json({
           success: false,
@@ -80,13 +98,13 @@ module.exports = {
         });
       }
 
-      // 3. Torrents සෙවීම (Title සහ Year සමඟ)
+      // 3. YTS වෙතින් Torrents සෙවීම
       let torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}&quality=all`;
       let response = await fetch(torrentsUrl, { headers: defaultHeaders });
       let data = response.ok ? await response.json() : { hits: [] };
       let hits = data.hits || [];
 
-      // Fallback 1: Year එක නිසා torrents නොලැබුණහොත් Title එකෙන් පමණක් සෙවීම
+      // Fallback 1: Year එක නිසා hits 0 වුවහොත් Title එකෙන් පමණක් සෙවීම
       if (hits.length === 0 && year) {
         const fbUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title)}&year=&quality=all`;
         const fbRes = await fetch(fbUrl, { headers: defaultHeaders });
@@ -96,7 +114,7 @@ module.exports = {
         }
       }
 
-      // Fallback 2: Title එකේ Colon (:) ඇත්නම් ප්‍රධාන නමෙන් සෙවීම (e.g. "Avatar: The Way of Water" -> "Avatar")
+      // Fallback 2: Title එකේ Subtitles හෝ Colon (:) තිබේ නම් මුල් නමෙන් සෙවීම
       if (hits.length === 0 && title.includes(":")) {
         const cleanTitle = title.split(":")[0].trim();
         const fbUrl2 = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(cleanTitle)}&year=&quality=all`;
