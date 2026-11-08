@@ -1,6 +1,9 @@
-const { MsEdgeTTS, OUTPUT_FORMAT } = require("ms-edge-tts");
+const WebSocket = require("ws");
+const crypto = require("crypto");
 
-// පරිශීලකයාට තෝරාගැනීම සඳහා ලබා දෙන Microsoft Neural Voices ලැයිස්තුව
+const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EA65408183E4CBA214552F60";
+const WSS_URL = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}`;
+
 const AVAILABLE_VOICES = [
   { id: "en-US-AriaNeural", name: "Aria", gender: "Female", lang: "English (US)", flag: "🇺🇸" },
   { id: "en-US-GuyNeural", name: "Guy", gender: "Male", lang: "English (US)", flag: "🇺🇸" },
@@ -12,6 +15,77 @@ const AVAILABLE_VOICES = [
   { id: "ta-IN-PallaviNeural", name: "Pallavi", gender: "Female", lang: "Tamil (India)", flag: "🇮🇳" },
   { id: "ta-IN-ValluvarNeural", name: "Valluvar", gender: "Male", lang: "Tamil (India)", flag: "🇮🇳" }
 ];
+
+// Direct WebSocket Audio Synthesizer
+function synthesizeSpeech(text, voice, pitch = "+0Hz", rate = "+0%") {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(WSS_URL, {
+      headers: {
+        "Pragma": "no-cache",
+        "Cache-Control": "no-cache",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+        "Origin": "chrome-extension://jdiccldimpdaibmpdkgiklldnnnkddap"
+      }
+    });
+
+    const requestId = crypto.randomUUID().replace(/-/g, "");
+    const audioBuffers = [];
+
+    ws.on("open", () => {
+      // 1. Send speech config
+      const configMsg = `X-Timestamp:${new Date().toISOString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
+        JSON.stringify({
+          context: {
+            synthesis: {
+              audio: {
+                metadataoptions: { sentenceBoundaryEnabled: "false", wordBoundaryEnabled: "false" },
+                outputFormat: "audio-24khz-48kbitrate-mono-mp3"
+              }
+            }
+          }
+        });
+      ws.send(configMsg);
+
+      // 2. Send SSML request
+      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
+        `<voice name='${voice}'>` +
+        `<prosody pitch='${pitch}' rate='${rate}'>${text}</prosody>` +
+        `</voice></speak>`;
+
+      const requestMsg = `X-RequestId:${requestId}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${new Date().toISOString()}Z\r\nPath:ssml\r\n\r\n${ssml}`;
+      ws.send(requestMsg);
+    });
+
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) {
+        // Binary audio stream handling
+        const separator = "Path:audio\r\n";
+        const index = data.indexOf(separator);
+        if (index !== -1) {
+          const audioChunk = data.slice(index + separator.length);
+          audioBuffers.push(audioChunk);
+        }
+      } else {
+        const textData = data.toString();
+        if (textData.includes("Path:turn.end")) {
+          ws.close();
+          resolve(Buffer.concat(audioBuffers));
+        }
+      }
+    });
+
+    ws.on("error", (err) => {
+      reject(err);
+    });
+
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+        reject(new Error("Edge TTS WebSocket timeout"));
+      }
+    }, 15000);
+  });
+}
 
 module.exports = {
   name: "Microsoft Neural TTS Multi-Voice",
@@ -33,25 +107,22 @@ module.exports = {
         });
       }
 
-      // 1. යම් කිසි නිශ්චිත voice එකක් stream කිරීමට ඉල්ලා ඇත්නම් කෙලින්ම MP3 stream කිරීම
+      // 1. Single voice streaming request
       if (singleVoice && isStream) {
-        const tts = new MsEdgeTTS();
-        await tts.setMetadata(singleVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-        const readableStream = tts.toStream(text.trim(), { rate, pitch });
-
+        const audioBuffer = await synthesizeSpeech(text.trim(), singleVoice, pitch, rate);
         res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Content-Length", audioBuffer.length);
         res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Cache-Control", "no-cache");
-        return readableStream.pipe(res);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.send(audioBuffer);
       }
 
-      // 2. Default ක්‍රියාවලිය: සියලුම voices සඳහා direct playable streaming links ජනනය කර ලබා දීම
+      // 2. Default: Generate options for all voices
       const currentHost = req.protocol + "://" + req.get("host");
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
       const voiceOptions = AVAILABLE_VOICES.map((v) => {
         const streamUrl = `${currentHost}/api/v1/media/microsoft/tts?text=${encodeURIComponent(text.trim())}&voice=${v.id}&pitch=${encodeURIComponent(pitch)}&rate=${encodeURIComponent(rate)}&stream=true${apiKeyParam}`;
-        
         return {
           id: v.id,
           name: v.name,
@@ -72,7 +143,7 @@ module.exports = {
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "Microsoft Edge TTS Multi-Voice Failed: " + err.message
+        error: "Microsoft Edge TTS Synthesis Failed: " + err.message
       });
     }
   }
