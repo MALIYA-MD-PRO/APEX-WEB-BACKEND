@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const CINESUBZ_API = process.env.CINESUBZ_API || "https://ocean-intervals-english-sega.trycloudflare.com";
+const CINESUBZ_API = process.env.CINESUBZ_API || "https://bless-possibly-allen-along.trycloudflare.com";
 const SECRET_PARAM = "own";
 const SECRET_VALUE = "maliya";
 
