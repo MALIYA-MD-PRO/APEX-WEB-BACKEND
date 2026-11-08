@@ -2,7 +2,6 @@ const WebSocket = require("ws");
 const crypto = require("crypto");
 
 const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EA65408183E4CBA214552F60";
-const WSS_URL = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}`;
 
 const AVAILABLE_VOICES = [
   { id: "en-US-AriaNeural", name: "Aria", gender: "Female", lang: "English (US)", flag: "🇺🇸" },
@@ -16,15 +15,27 @@ const AVAILABLE_VOICES = [
   { id: "ta-IN-ValluvarNeural", name: "Valluvar", gender: "Male", lang: "Tamil (India)", flag: "🇮🇳" }
 ];
 
-// Direct WebSocket Audio Synthesizer
+// 401 Bypass Token (Sec-MS-GEC Generation)
+function generateSecMsGec() {
+  const WIN_EPOCH = 116444736000000000n;
+  const ticks = BigInt(Date.now()) * 10000n + WIN_EPOCH;
+  const roundedTicks = ticks - (ticks % 3000000000n);
+  const strToHash = `${roundedTicks}${TRUSTED_CLIENT_TOKEN}`;
+  return crypto.createHash("sha256").update(strToHash, "ascii").digest("hex").toUpperCase();
+}
+
 function synthesizeSpeech(text, voice, pitch = "+0Hz", rate = "+0%") {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(WSS_URL, {
+    const secMsGec = generateSecMsGec();
+    const wssUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-130.0.2849.68`;
+
+    const ws = new WebSocket(wssUrl, {
       headers: {
         "Pragma": "no-cache",
         "Cache-Control": "no-cache",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
-        "Origin": "chrome-extension://jdiccldimpdaibmpdkgiklldnnnkddap"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.2849.68",
+        "Origin": "chrome-extension://jdiccldimpdaibmpdkgiklldnnnkddap",
+        "Accept-Encoding": "gzip, deflate, br"
       }
     });
 
@@ -32,7 +43,7 @@ function synthesizeSpeech(text, voice, pitch = "+0Hz", rate = "+0%") {
     const audioBuffers = [];
 
     ws.on("open", () => {
-      // 1. Send speech config
+      // 1. Handshake config
       const configMsg = `X-Timestamp:${new Date().toISOString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
         JSON.stringify({
           context: {
@@ -46,7 +57,7 @@ function synthesizeSpeech(text, voice, pitch = "+0Hz", rate = "+0%") {
         });
       ws.send(configMsg);
 
-      // 2. Send SSML request
+      // 2. SSML XML Payload
       const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
         `<voice name='${voice}'>` +
         `<prosody pitch='${pitch}' rate='${rate}'>${text}</prosody>` +
@@ -58,11 +69,10 @@ function synthesizeSpeech(text, voice, pitch = "+0Hz", rate = "+0%") {
 
     ws.on("message", (data, isBinary) => {
       if (isBinary) {
-        // Binary audio stream handling
-        const separator = "Path:audio\r\n";
+        const separator = Buffer.from("Path:audio\r\n");
         const index = data.indexOf(separator);
         if (index !== -1) {
-          const audioChunk = data.slice(index + separator.length);
+          const audioChunk = data.subarray(index + separator.length);
           audioBuffers.push(audioChunk);
         }
       } else {
@@ -81,7 +91,7 @@ function synthesizeSpeech(text, voice, pitch = "+0Hz", rate = "+0%") {
     setTimeout(() => {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
-        reject(new Error("Edge TTS WebSocket timeout"));
+        reject(new Error("Edge TTS synthesis timeout"));
       }
     }, 15000);
   });
@@ -107,7 +117,7 @@ module.exports = {
         });
       }
 
-      // 1. Single voice streaming request
+      // 1. Direct Voice Stream
       if (singleVoice && isStream) {
         const audioBuffer = await synthesizeSpeech(text.trim(), singleVoice, pitch, rate);
         res.setHeader("Content-Type", "audio/mpeg");
@@ -117,7 +127,7 @@ module.exports = {
         return res.send(audioBuffer);
       }
 
-      // 2. Default: Generate options for all voices
+      // 2. All Voice Options
       const currentHost = req.protocol + "://" + req.get("host");
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
