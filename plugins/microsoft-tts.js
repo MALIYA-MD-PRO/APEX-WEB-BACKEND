@@ -3,13 +3,12 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-// ── Directory & Limits Configuration ─────────────────────────────────────────
 const TTS_TEMP_DIR = path.join(__dirname, "../temp/tts");
 if (!fs.existsSync(TTS_TEMP_DIR)) {
   fs.mkdirSync(TTS_TEMP_DIR, { recursive: true });
 }
 
-const MAX_TOTAL_SIZE_BYTES = 150 * 1024 * 1024; // Max 150 MB Storage Guard
+const MAX_TOTAL_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB Max
 const EXPIRE_TIME_MS = 20 * 60 * 1000;          // 20 Minutes Expiry
 
 const AVAILABLE_VOICES = [
@@ -24,15 +23,13 @@ const AVAILABLE_VOICES = [
   { id: "ta-IN-ValluvarNeural", name: "Valluvar", gender: "Male", lang: "Tamil (India)", flag: "🇮🇳" }
 ];
 
-// ── Storage Capacity & Expiry Cleaners ─────────────────────────────────────────
 function getDirectorySizeBytes() {
   try {
     const files = fs.readdirSync(TTS_TEMP_DIR);
     let totalSize = 0;
     for (const file of files) {
-      const filePath = path.join(TTS_TEMP_DIR, file);
       try {
-        const stats = fs.statSync(filePath);
+        const stats = fs.statSync(path.join(TTS_TEMP_DIR, file));
         totalSize += stats.size;
       } catch (_) {}
     }
@@ -66,9 +63,7 @@ function ensureStorageLimit(incomingBytes = 0) {
         if (currentTotal + incomingBytes <= MAX_TOTAL_SIZE_BYTES) break;
       } catch (_) {}
     }
-  } catch (err) {
-    console.error("[TTS Cleaner Error]:", err.message);
-  }
+  } catch (_) {}
 }
 
 setInterval(() => {
@@ -87,7 +82,6 @@ setInterval(() => {
   } catch (_) {}
 }, 2 * 60 * 1000);
 
-// ── Microsoft Edge Speech Engine ─────────────────────────────────────────────
 function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
   return new Promise((resolve, reject) => {
     const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
@@ -116,7 +110,6 @@ function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
         return;
       }
 
-      // Fallback Engine
       const fallbackLang = voice.startsWith("si") ? "si" : voice.startsWith("ta") ? "ta" : "en";
       const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${fallbackLang}&client=tw-ob`;
 
@@ -145,23 +138,20 @@ function synthesizeEdgeRest(text, voice, pitch = "+0Hz", rate = "+0%") {
 function saveTempAudio(buffer, voiceId) {
   ensureStorageLimit(buffer.length);
   const randomId = crypto.randomBytes(6).toString("hex");
-  const fileName = `apex_tts_${voiceId}_${Date.now()}_${randomId}.mp3`;
+  const fileName = `apex_${voiceId}_${Date.now()}_${randomId}.mp3`;
   const fullPath = path.join(TTS_TEMP_DIR, fileName);
 
   fs.writeFileSync(fullPath, buffer);
 
   setTimeout(() => {
     try {
-      if (fs.existsSync(fullPath)) {
-        fs.unlinkSync(fullPath);
-      }
+      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
     } catch (_) {}
   }, EXPIRE_TIME_MS);
 
   return fileName;
 }
 
-// ── Plugin Definition ────────────────────────────────────────────────────────
 module.exports = {
   name: "Microsoft Neural TTS Multi-Voice",
   category: "media",
@@ -169,7 +159,7 @@ module.exports = {
   path: "/api/v1/media/microsoft/tts",
   handler: async (req, res) => {
     try {
-      // 1. Direct Auto-Download Endpoint (?download=filename හෝ ?token=filename)
+      // 1. Direct Auto-Download Binary Stream Router
       const downloadTarget = req.query.download || req.query.token || req.query.file;
       if (downloadTarget) {
         const targetFile = path.basename(downloadTarget);
@@ -183,13 +173,9 @@ module.exports = {
         }
 
         const stat = fs.statSync(filePath);
-
-        // Force Auto-Download Headers
-        res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader("Content-Type", "audio/mpeg");
         res.setHeader("Content-Disposition", `attachment; filename="${targetFile}"`);
         res.setHeader("Content-Length", stat.size);
-        res.setHeader("Cache-Control", "no-cache");
-
         return fs.createReadStream(filePath).pipe(res);
       }
 
@@ -206,42 +192,41 @@ module.exports = {
         });
       }
 
+      // stream=true දුන්නොත් පමණක් Raw MP3 Stream කිරීම
+      if (singleVoice && isStream) {
+        const audioBuffer = await synthesizeEdgeRest(text.trim(), singleVoice, pitch, rate);
+        res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Content-Length", audioBuffer.length);
+        return res.end(audioBuffer);
+      }
+
       const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
       const host = req.get("host");
       const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      // 2. තනි Voice එකක් සඳහා auto download link සැකසීම
+      // 2. තනි voice එකක් ඉල්ලූ විට JSON එකක් සමඟ Auto-Download Link එක ලබා දීම
       if (singleVoice) {
         const audioBuffer = await synthesizeEdgeRest(text.trim(), singleVoice, pitch, rate);
-
-        if (isStream) {
-          res.setHeader("Content-Type", "audio/mpeg");
-          res.setHeader("Content-Length", audioBuffer.length);
-          res.setHeader("Accept-Ranges", "bytes");
-          return res.end(audioBuffer);
-        }
-
         const fileName = saveTempAudio(audioBuffer, singleVoice);
-        // Link එකට ගිය සැණින් Auto Download වේ
-        const autoDownloadUrl = `${currentHost}/api/v1/media/microsoft/tts?download=${fileName}${apiKeyParam}`;
+        const downloadUrl = `${currentHost}/api/v1/media/microsoft/tts?download=${fileName}${apiKeyParam}`;
 
         return res.json({
           success: true,
           voice: singleVoice,
           text: text.trim(),
           fileSize: `${(audioBuffer.length / 1024).toFixed(1)} KB`,
-          downloadUrl: autoDownloadUrl,
+          autoDownloadUrl: downloadUrl,
           expiresIn: "20 minutes"
         });
       }
 
-      // 3. All Voices — Multi Auto-Download Links
+      // 3. Multi-Voice Selection — Default JSON Response
       const voicePromises = AVAILABLE_VOICES.map(async (v) => {
         try {
           const audioBuffer = await synthesizeEdgeRest(text.trim(), v.id, pitch, rate);
           const fileName = saveTempAudio(audioBuffer, v.id);
-          const autoDownloadUrl = `${currentHost}/api/v1/media/microsoft/tts?download=${fileName}${apiKeyParam}`;
+          const downloadUrl = `${currentHost}/api/v1/media/microsoft/tts?download=${fileName}${apiKeyParam}`;
 
           return {
             id: v.id,
@@ -250,9 +235,9 @@ module.exports = {
             language: v.lang,
             flag: v.flag,
             size: `${(audioBuffer.length / 1024).toFixed(1)} KB`,
-            autoDownloadUrl
+            autoDownloadUrl: downloadUrl
           };
-        } catch (voiceErr) {
+        } catch (_) {
           return {
             id: v.id,
             name: v.name,
