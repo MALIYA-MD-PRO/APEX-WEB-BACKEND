@@ -31,19 +31,20 @@ module.exports = {
       const rawResults = data.results || [];
 
       const results = rawResults.map((item) => {
-        const title = item.title || item.name || "Unknown";
+        // Title එකේ ඇති colon (:) ඇතුළු නියම නම එලෙසම තබා ගැනීම
+        const exactTitle = item.title || item.name || "Unknown";
         const date = item.release_date || item.first_air_date || "";
         const year = date ? date.slice(0, 4) : "";
         const rating = item.vote_average ? Number(item.vote_average.toFixed(1)) : 0;
         const poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null;
         const backdrop = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null;
 
-        // Movie Title එකෙන් ආවේණික Apex Landing Link එක සෑදීම
-        const apexUrl = `https://apex-api-pro.vercel.app/yts?title=${encodeURIComponent(title)}`;
+        // Title එකේ colon (:) ආරක්ෂා වන පරිදි encode කර URL එක සෑදීම
+        const apexUrl = `https://apex-api-pro.vercel.app/yts?title=${encodeURIComponent(exactTitle)}`;
 
         return {
           id: item.id,
-          title,
+          title: exactTitle, // "Spider-Man: Brand New Day"
           year,
           mediaType: item.media_type || mode,
           rating,
@@ -51,7 +52,6 @@ module.exports = {
           overview: item.overview || "",
           poster,
           backdrop,
-          // DL endpoint එකට ලබා දිය හැකි URL එක
           apexUrl,
           dlEndpoint: `/api/v1/movies/yts/dl?url=${encodeURIComponent(apexUrl)}`
         };
