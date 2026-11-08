@@ -13,37 +13,36 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i];
 }
 
-// TMDB ID එකෙන් සැබෑ නම සහ වසර ලබා ගැනීමේ Helper function එක
-async function resolveDetailsFromId(id) {
+// Search එකෙන් ලැබෙන TMDB ID එකෙන් සැබෑ නම සහ වසර ලබා ගැනීම
+async function fetchDetailsFromTMDB(id) {
   try {
-    // 1. Upstream YTS Detail endpoint
-    const url1 = `${BASE_URL}/?api=detail&mode=movie&id=${id}`;
-    const res1 = await fetch(url1, { headers: defaultHeaders });
-    if (res1.ok) {
-      const data = await res1.json();
-      if (data && (data.title || data.name)) {
-        const title = data.title || data.name;
-        const date = data.release_date || data.first_air_date || "";
-        const year = date ? date.slice(0, 4) : "";
+    const tmdbUrl = `https://api.themoviedb.org/3/movie/${id}?api_key=15d2ade7c014e3e4a017e4130a67a554`;
+    const res = await fetch(tmdbUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && (data.title || data.original_title)) {
+        const title = data.title || data.original_title;
+        const year = data.release_date ? data.release_date.slice(0, 4) : "";
         return { title, year };
       }
     }
-  } catch (e) {}
+  } catch (err) {
+    console.warn("[TMDB Lookup Error]:", err.message);
+  }
 
+  // Fallback upstream detail check
   try {
-    // 2. Public TMDB Fallback Mirror (ID lookup සඳහා)
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${id}?api_key=15d2ade7c014e3e4a017e4130a67a554`;
-    const res2 = await fetch(tmdbUrl);
+    const ytsDetailUrl = `${BASE_URL}/?api=detail&mode=movie&id=${id}`;
+    const res2 = await fetch(ytsDetailUrl, { headers: defaultHeaders });
     if (res2.ok) {
       const data2 = await res2.json();
-      if (data2 && data2.title) {
-        return {
-          title: data2.title,
-          year: data2.release_date ? data2.release_date.slice(0, 4) : ""
-        };
+      if (data2 && (data2.title || data2.name)) {
+        const title = data2.title || data2.name;
+        const year = data2.release_date ? data2.release_date.slice(0, 4) : "";
+        return { title, year };
       }
     }
-  } catch (e) {}
+  } catch (err2) {}
 
   return null;
 }
@@ -55,40 +54,39 @@ module.exports = {
   path: "/api/v1/movies/yts/dl",
   handler: async (req, res) => {
     try {
-      // 1. Query parameters හෝ Full Raw URL එකෙන් Movie ID එක හඳුනා ගැනීම
+      // 1. Raw URL හෝ parameters කියවා ගැනීම
+      const rawUrlParam = req.query.url ? decodeURIComponent(req.query.url) : "";
+      const rawFullUrl = req.originalUrl ? decodeURIComponent(req.originalUrl) : "";
       let movieId = req.query.id || "";
       let title = req.query.title || req.query.name || "";
       let year = req.query.year || "";
       let mode = req.query.mode || "movie";
 
-      // req.originalUrl එකේ හෝ query parameters වල අඩංගු URL එකෙන් id අගය සොයා ගැනීම
-      const rawFullUrl = req.originalUrl || "";
-      const urlParam = req.query.url || "";
-
+      // 2. ID එක extract කරගැනීම (Search එකෙන් ආ apexUrl එකෙන් හෝ query එකෙන්)
       if (!movieId) {
-        const idMatch = rawFullUrl.match(/id[=:<%3D]?\s*(\d+)/i) || urlParam.match(/id[=:<%3D]?\s*(\d+)/i);
-        if (idMatch) {
-          movieId = idMatch[1];
-        } else if (/^\d+$/.test(urlParam.trim())) {
-          movieId = urlParam.trim();
-        } else if (/^\d+$/.test(title.trim())) {
+        const match = rawUrlParam.match(/id=(\d+)/i) || rawFullUrl.match(/id=(\d+)/i);
+        if (match) {
+          movieId = match[1];
+        } else if (/^\d+$/.test(rawUrlParam.trim())) {
+          movieId = rawUrlParam.trim();
+        } else if (title && /^\d+$/.test(title.trim())) {
           movieId = title.trim();
           title = "";
         }
       }
 
-      // 2. Movie ID එකෙන් නිශ්චිත Title සහ Year එක සොයා ගැනීම
+      // 3. Movie ID එක තිබේ නම් TMDB හරහා සැබෑ නම සහ වසර ලබා ගැනීම
       if (movieId) {
-        const resolved = await resolveDetailsFromId(movieId);
-        if (resolved) {
-          title = resolved.title;
-          if (!year && resolved.year) year = resolved.year;
+        const meta = await fetchDetailsFromTMDB(movieId);
+        if (meta) {
+          title = meta.title;
+          if (!year && meta.year) year = meta.year;
         }
       }
 
-      // Title එකට URL එකක් ආවා නම් එය පිරිසිදු කිරීම
-      if (!title && urlParam && !urlParam.startsWith("http")) {
-        title = urlParam.trim();
+      // URL එකක් නොවන සරල title එකක් ආවේ නම් එය භාවිත කිරීම
+      if (!title && rawUrlParam && !rawUrlParam.startsWith("http")) {
+        title = rawUrlParam.trim();
       }
 
       if (!title) {
@@ -98,15 +96,15 @@ module.exports = {
         });
       }
 
-      // 3. YTS වෙතින් Torrents සෙවීම
-      let torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}&quality=all`;
+      // 4. Title සහ Year සමඟ YTS Torrents සෙවීම
+      let torrentsUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=${encodeURIComponent(year.trim())}&quality=all`;
       let response = await fetch(torrentsUrl, { headers: defaultHeaders });
       let data = response.ok ? await response.json() : { hits: [] };
       let hits = data.hits || [];
 
-      // Fallback 1: Year එක නිසා hits 0 වුවහොත් Title එකෙන් පමණක් සෙවීම
+      // Fallback 1: Year එක නිසා torrents නොලැබුණහොත් Title එකෙන් පමණක් සෙවීම
       if (hits.length === 0 && year) {
-        const fbUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title)}&year=&quality=all`;
+        const fbUrl = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(title.trim())}&year=&quality=all`;
         const fbRes = await fetch(fbUrl, { headers: defaultHeaders });
         if (fbRes.ok) {
           const fbData = await fbRes.json();
@@ -114,10 +112,10 @@ module.exports = {
         }
       }
 
-      // Fallback 2: Title එකේ Subtitles හෝ Colon (:) තිබේ නම් මුල් නමෙන් සෙවීම
+      // Fallback 2: Subtitle හෝ colon (:) ඉවත් කර ප්‍රධාන නමෙන් සෙවීම
       if (hits.length === 0 && title.includes(":")) {
-        const cleanTitle = title.split(":")[0].trim();
-        const fbUrl2 = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(cleanTitle)}&year=&quality=all`;
+        const mainTitle = title.split(":")[0].trim();
+        const fbUrl2 = `${BASE_URL}/?api=torrents&mode=${encodeURIComponent(mode)}&name=${encodeURIComponent(mainTitle)}&year=&quality=all`;
         const fbRes2 = await fetch(fbUrl2, { headers: defaultHeaders });
         if (fbRes2.ok) {
           const fbData2 = await fbRes2.json();
@@ -139,9 +137,9 @@ module.exports = {
 
       return res.json({
         success: true,
+        movieId: movieId || null,
         title,
         year: year || null,
-        movieId: movieId || null,
         totalTorrents: torrents.length,
         torrents
       });
