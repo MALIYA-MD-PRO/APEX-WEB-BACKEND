@@ -52,7 +52,7 @@ app.get("/", (req, res) => {
 const SYSTEM_ENDPOINTS = [
   { id: 'cinesubz-search', name: 'CineSubz · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesubz/search' },
   { id: 'cinesubz-info', name: 'CineSubz · Info & Links', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesubz/info' },
-  { id: 'cinesubz-dl', name: 'CineSubz · Direct DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesubz/dl' },
+  { id: 'Cinesubz-dl', name: 'CineSubz · Direct DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesubz/dl' },
   { id: 'sinhalacartoons-search', name: 'SinhalaCartoons · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/sinhalacartoons/search' },
   { id: 'sinhalacartoons-dl', name: 'SinhalaCartoons · DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/sinhalacartoons/dl' },
   { id: 'tamilmv-search', name: '1TamilMV · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/tamilmv/search' },
