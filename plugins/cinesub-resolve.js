@@ -18,6 +18,7 @@ module.exports = {
         let contentType = "application/octet-stream";
         if (fileName.endsWith(".vtt")) contentType = "text/vtt";
         else if (fileName.endsWith(".mp4")) contentType = "video/mp4";
+        else if (fileName.endsWith(".html")) contentType = "text/html";
 
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Type", contentType);
@@ -77,7 +78,7 @@ module.exports = {
         ? `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/sinhala_subtitles%2Fmovies%2F${tmdbId}.vtt?alt=media&token=${token}`
         : `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/sinhala_subtitles%2Fmovies%2F${tmdbId}.vtt?alt=media`;
 
-      // Check Subtitle existence
+      // Check Subtitle existence (200 OK check)
       let hasSub = false;
       try {
         const headRes = await gotScraping.head(potentialSubUrl, {
@@ -104,10 +105,12 @@ module.exports = {
       const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      // ── අපගේම Domain Gateway එක හරහා Direct Auto-Download වෙන Links ──
+      // ── අපගේම Gateway එක හරහා Force Auto-Download වන Direct Streams ──
       const autoDownloadSubUrl = hasSub
         ? `${currentHost}/api/v1/movies/cinesub/resolve?stream=${encodeURIComponent(potentialSubUrl)}&filename=CineSub_${tmdbId}_Sinhala.vtt${apiKeyParam}`
         : null;
+
+      const autoDownloadPlayerStreamUrl = `${currentHost}/api/v1/movies/cinesub/resolve?stream=${encodeURIComponent(rawPlayerUrl)}&filename=CineSub_Player_${tmdbId}.html${apiKeyParam}`;
 
       return res.json({
         success: true,
@@ -116,11 +119,16 @@ module.exports = {
         hasSinhalaSubtitle: hasSub,
         statusMessage: hasSub ? "සිංහල උපසිරැසි (Sinhala Subtitle) පවතී." : "මෙම චිත්‍රපටය සඳහා සිංහල උපසිරැසි (Subtitle) නොමැත.",
         downloads: {
-          subtitleVttUrl: autoDownloadSubUrl, // Direct auto download .vtt file
+          // Direct Auto-Download වෙන අපගේම Gateway Links
+          DirectDownloadSubtitleUrl: autoDownloadSubUrl,
+          DirectDownloadPlayerStreamUrl: autoDownloadPlayerStreamUrl,
+
+          // මුල් Direct Raw URLs
           rawSubtitleUrl: hasSub ? potentialSubUrl : null
         },
         player: {
-          webPlayerUrl: rawPlayerUrl
+          // සෘජුවම Browser එකේ Play කළ හැකි Web Player URL එක
+          rawwebPlayerUrl: rawPlayerUrl
         }
       });
 
