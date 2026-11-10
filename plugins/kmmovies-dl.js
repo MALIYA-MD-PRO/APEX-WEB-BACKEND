@@ -2,39 +2,58 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * CLI script එකෙහි සාර්ථක වූ නිවැරදි SkyDrop 4-Step Bypass Logic එක
+ * CLI script එකෙහි සාර්ථක වූ 4-Step SkyDrop Session Resolver
  */
 async function bypassSkydrop(magicLinkUrl, gotScraping) {
   try {
-    // 1. MagicLinks එකෙන් Skydrop URL එක ලබා ගැනීම
+    // 1. MagicLinks පිටුව ලබා ගැනීම
     const magicRes = await gotScraping.get(magicLinkUrl, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Referer": "https://kmmovies.beer/"
+      },
       timeout: { request: 12000 }
     });
+
     const $ = cheerio.load(magicRes.body);
 
+    // Button text හෝ href එකෙන් SKYDROP URL එක සෙවීම
     let skydropUrl = "";
     $(".download-button").each((_, el) => {
       const text = $(el).text().trim().toUpperCase();
-      if (text.includes("SKYDROP")) {
-        skydropUrl = $(el).attr("href");
+      const href = $(el).attr("href");
+      if (text.includes("SKYDROP") && href) {
+        skydropUrl = href;
       }
     });
 
+    // Fallback search
+    if (!skydropUrl) {
+      $('a[href*="skydrop"]').each((_, el) => {
+        const href = $(el).attr("href");
+        if (href && href.startsWith("http")) skydropUrl = href;
+      });
+    }
+
     if (!skydropUrl) return null;
 
-    const baseUrl = new URL(skydropUrl).origin; // e.g. https://w1.skydrop.sbs
+    const baseUrl = new URL(skydropUrl).origin; // https://w1.skydrop.sbs
 
     // Step 1: Initial load to get the session cookie
     const res1 = await gotScraping.get(skydropUrl, {
+      headers: { "User-Agent": USER_AGENT },
       timeout: { request: 10000 }
     });
-    const cookies = res1.headers["set-cookie"]
-      ? res1.headers["set-cookie"].map((c) => c.split(";")[0]).join("; ")
+
+    const rawCookies = res1.headers["set-cookie"];
+    const cookies = rawCookies
+      ? rawCookies.map((c) => c.split(";")[0]).join("; ")
       : "";
 
-    // Step 2: POST to /resolve/ (Registers file ID to session)
+    // Step 2: POST to /resolve/ (This registers the file ID to the session)
     const resolveUrl = new URL("/resolve/", baseUrl).href;
     await axios.post(resolveUrl, "", {
       headers: {
@@ -58,7 +77,7 @@ async function bypassSkydrop(magicLinkUrl, gotScraping) {
       timeout: 10000
     });
 
-    // Step 4: POST to /fetch/ to get the final 302/303 Google redirect link
+    // Step 4: POST to /fetch/ to get the final Google link
     const fetchUrl = new URL("/fetch/", baseUrl).href;
     const postRes = await axios.post(fetchUrl, "", {
       headers: {
@@ -112,23 +131,29 @@ module.exports = {
       }
 
       // ── 2. Movie Link Resolution ─────────────────────────────────────────
-      const movieUrl = req.query.url;
+      let movieUrl = (req.query.url || "").trim();
       if (!movieUrl) {
         return res.status(400).json({
           success: false,
-          error: "Parameter 'url' is required (e.g. movie page link)"
+          error: "Parameter 'url' is required (e.g. https://kmmovies.beer/leo-2023/)"
         });
       }
 
+      // Trailing slash නිවැරදි කිරීම (WordPress query break නොවීමට)
+      if (!movieUrl.endsWith("/")) {
+        movieUrl += "/";
+      }
+
       const moviePageRes = await gotScraping.get(movieUrl, {
-        timeout: { request: 12000 }
+        headers: { "User-Agent": USER_AGENT },
+        timeout: { request: 15000 }
       });
       const $ = cheerio.load(moviePageRes.body);
 
       const title = $("h1.entry-title").first().text().trim() || $("title").text().trim();
       const rawWebDlItems = [];
 
-      // Encoded versions මඟහැර WEB-DL categories පමණක් නිස්සාරණය කිරීම
+      // WEB-DL Versions පමණක් වෙන් කර ගැනීම
       $(".download-category.webdl .dl-btn").each((_, el) => {
         const resQuality = $(el).find(".dl-res").text().trim() || "WEB-DL";
         const size = $(el).find(".dl-size").text().trim() || "Unknown";
@@ -155,23 +180,29 @@ module.exports = {
       const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      // සියලුම WEB-DL Qualities එකවර Parallel Bypass කිරීම
-      const resolvedDownloads = await Promise.all(
-        rawWebDlItems.map(async (item, idx) => {
-          const directGoogleUrl = await bypassSkydrop(item.magicUrl, gotScraping);
-          const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
-          const fileName = `${safeTitle}_${item.quality.replace(/\s+/g, "_")}_${idx + 1}.mp4`;
+      // SkyDrop එක Block නොවීමට sequential loop එකකින් resolve කිරීම
+      const resolvedDownloads = [];
+      for (let i = 0; i < rawWebDlItems.length; i++) {
+        const item = rawWebDlItems[i];
+        const directGoogleUrl = await bypassSkydrop(item.magicUrl, gotScraping);
 
-          return {
-            quality: item.quality,
-            size: item.size,
-            directDownloadUrl: directGoogleUrl,
-            autoDownloadUrl: directGoogleUrl
-              ? `${currentHost}/api/v1/movies/kmmovies/dl?stream=${encodeURIComponent(directGoogleUrl)}&filename=${fileName}${apiKeyParam}`
-              : null
-          };
-        })
-      );
+        const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
+        const fileName = `${safeTitle}_${item.quality.replace(/\s+/g, "_")}_${i + 1}.mp4`;
+
+        resolvedDownloads.push({
+          quality: item.quality,
+          size: item.size,
+          directDownloadUrl: directGoogleUrl,
+          autoDownloadUrl: directGoogleUrl
+            ? `${currentHost}/api/v1/movies/kmmovies/dl?stream=${encodeURIComponent(directGoogleUrl)}&filename=${fileName}${apiKeyParam}`
+            : null
+        });
+
+        // Request sessions අතර කෙටි delay එකක් (SkyDrop spam-block නොවීමට)
+        if (i < rawWebDlItems.length - 1) {
+          await sleep(500);
+        }
+      }
 
       return res.json({
         success: true,
