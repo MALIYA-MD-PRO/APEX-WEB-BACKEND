@@ -1,6 +1,26 @@
+const https = require("https");
+
 const BASE_URL = 'https://cinesub.lk';
 const FIREBASE_BUCKET = 'cinezubz.firebasestorage.app';
 const TMDB_API_KEY = '8265bd1679663a7ea12ac168da84d2e8';
+
+// Native HTTPS මඟින් Firebase එකෙන් කෙලින්ම Subtitle එක Fetch කරගැනීම
+function fetchFirebaseBuffer(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      // Redirects හැසිරවීම (301, 302, 307)
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchFirebaseBuffer(res.headers.location).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Firebase returned status ${res.statusCode}`));
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', reject);
+  });
+}
 
 module.exports = {
   name: "CineSub · Resolve Links",
@@ -11,39 +31,46 @@ module.exports = {
     try {
       const { gotScraping } = await import("got-scraping");
 
-      // ── 1. Dedicated Subtitle Auto-Download Proxy (Buffer Stream) ──────────
-      // stream parameter එක ආ විට 0b නොවී සම්පූර්ණ file එක download කර එවයි
-      if (req.query.stream) {
-        const streamTargetUrl = decodeURIComponent(req.query.stream);
-        const fileName = req.query.filename || `CineSub_Subtitle_${Date.now()}.vtt`;
+      // ── 1. Dedicated Direct Subtitle Downloader ──────────────────────────
+      // tmdbId හෝ subUrl හරහා සෘජුවම බාගත කිරීම
+      if (req.query.download === "sub" || req.query.stream) {
+        let targetSubUrl = "";
+
+        if (req.query.subUrl) {
+          targetSubUrl = decodeURIComponent(req.query.subUrl);
+        } else if (req.query.tmdbId) {
+          const tId = req.query.tmdbId;
+          const token = req.query.token || (String(tId) === '557' ? 'af5c973c-3a2a-4938-ba6a-72ce86057df1' : '');
+          targetSubUrl = token
+            ? `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/sinhala_subtitles%2Fmovies%2F${tId}.vtt?alt=media&token=${token}`
+            : `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/sinhala_subtitles%2Fmovies%2F${tId}.vtt?alt=media`;
+        } else if (req.query.stream) {
+          targetSubUrl = decodeURIComponent(req.query.stream);
+        }
+
+        const fileName = req.query.filename || `CineSub_${req.query.tmdbId || Date.now()}_Sinhala.vtt`;
 
         try {
-          const fileResponse = await gotScraping.get(streamTargetUrl, {
-            responseType: 'buffer',
-            timeout: { request: 15000 },
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Referer': `${BASE_URL}/`
-            }
-          });
+          const subBuffer = await fetchFirebaseBuffer(targetSubUrl);
 
-          if (fileResponse.statusCode !== 200 || !fileResponse.body || fileResponse.body.length === 0) {
-            return res.status(404).send("Subtitle file not found or empty on storage.");
+          if (!subBuffer || subBuffer.length === 0) {
+            return res.status(404).send("Subtitle content empty.");
           }
 
-          res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+          // Force Download Headers
           res.setHeader("Content-Type", "text/vtt; charset=utf-8");
-          res.setHeader("Content-Length", fileResponse.body.length);
+          res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+          res.setHeader("Content-Length", subBuffer.length);
           res.setHeader("Access-Control-Allow-Origin", "*");
           res.setHeader("Cache-Control", "public, max-age=86400");
 
-          return res.end(fileResponse.body);
-        } catch (subErr) {
-          return res.status(502).send("Failed to stream subtitle file: " + subErr.message);
+          return res.end(subBuffer);
+        } catch (streamErr) {
+          return res.status(502).send("Failed to stream subtitle: " + streamErr.message);
         }
       }
 
-      // ── 2. Parameter Extraction & Normalization ───────────────────────────
+      // ── 2. Parameter Normalization ────────────────────────────────────────
       let inputParam = (req.query.tmdbId || req.query.id || req.query.url || req.query.slug || "").trim();
 
       if (!inputParam) {
@@ -125,11 +152,11 @@ module.exports = {
       if (!tmdbId) {
         return res.status(404).json({
           success: false,
-          error: "Could not resolve a valid TMDB ID from the provided input."
+          error: "Could not resolve a valid TMDB ID."
         });
       }
 
-      // ── 4. Firebase Subtitle Existence Check ───────────────────────────────
+      // ── 4. Firebase Subtitle Verification ─────────────────────────────────
       const potentialSubUrl = token
         ? `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/sinhala_subtitles%2Fmovies%2F${tmdbId}.vtt?alt=media&token=${token}`
         : `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/sinhala_subtitles%2Fmovies%2F${tmdbId}.vtt?alt=media`;
@@ -159,10 +186,11 @@ module.exports = {
       const host = req.get("host");
       const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : "";
 
-      // Subtitle Direct Auto-Download Gateway Link
-      const directDownloadSubUrl = hasSub
-        ? `${currentHost}/api/v1/movies/cinesub/resolve?stream=${encodeURIComponent(potentialSubUrl)}&filename=CineSub_${tmdbId}_Sinhala.vtt${apiKeyParam}`
+      // පිරිසිදු, කිසිදා නොකැඩෙන අපගේම Direct Download Link එක
+      const cleanDownloadUrl = hasSub
+        ? `${currentHost}/api/v1/movies/cinesub/resolve?download=sub&tmdbId=${tmdbId}${tokenParam}&filename=CineSub_${tmdbId}_Sinhala.vtt${apiKeyParam}`
         : null;
 
       return res.json({
@@ -172,7 +200,7 @@ module.exports = {
         hasSinhalaSubtitle: hasSub,
         statusMessage: hasSub ? "සිංහල උපසිරැසි (Sinhala Subtitle) පවතී." : "මෙම චිත්‍රපටය සඳහා සිංහල උපසිරැසි (Subtitle) නොමැත.",
         downloads: {
-          DirectDownloadSubtitleUrl: directDownloadSubUrl,
+          DirectDownloadSubtitleUrl: cleanDownloadUrl,
           rawSubtitleUrl: hasSub ? potentialSubUrl : null
         },
         player: {
