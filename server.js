@@ -75,7 +75,9 @@ const SYSTEM_ENDPOINTS = [
   { id: 'mediafire-dl', name: 'MediaFire · Direct DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/mediafire/dl' },
   { id: 'microsoft-tts', name: 'Microsoft · Neural TTS', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/microsoft/tts' },
   { id: 'chat-ubi', name: 'Universal Basic Intelligence (ch.at)', category: 'ai', categoryLabel: 'AI', path: '/api/v1/ai/chat/ubi' },
-  { id: 'tiktok-dl', name: 'TikTok · No Watermark HD DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/tiktok/dl' }
+  { id: 'tiktok-dl', name: 'TikTok · No Watermark HD DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/tiktok/dl' },
+  { id: 'cinesub-search', name: 'CineSub · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesub/search' },
+  { id: 'cinesub-resolve', name: 'CineSub · Resolve Links', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesub/resolve' }
 ];
 
 // ══════════════════════════════════════════════════════════════
