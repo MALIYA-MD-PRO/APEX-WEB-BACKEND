@@ -11,30 +11,39 @@ module.exports = {
     try {
       const { gotScraping } = await import("got-scraping");
 
-      // ── 1. Dedicated Direct Force Auto-Download Streamer ──────────────────
+      // ── 1. Dedicated Subtitle Auto-Download Proxy (Buffer Stream) ──────────
+      // stream parameter එක ආ විට 0b නොවී සම්පූර්ණ file එක download කර එවයි
       if (req.query.stream) {
         const streamTargetUrl = decodeURIComponent(req.query.stream);
-        const fileName = req.query.filename || `CineSub_${Date.now()}.bin`;
+        const fileName = req.query.filename || `CineSub_Subtitle_${Date.now()}.vtt`;
 
-        let contentType = "application/octet-stream";
-        if (fileName.endsWith(".vtt")) contentType = "text/vtt; charset=utf-8";
-        else if (fileName.endsWith(".mp4")) contentType = "video/mp4";
-        else if (fileName.endsWith(".html")) contentType = "text/html; charset=utf-8";
+        try {
+          const fileResponse = await gotScraping.get(streamTargetUrl, {
+            responseType: 'buffer',
+            timeout: { request: 15000 },
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': `${BASE_URL}/`
+            }
+          });
 
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=86400");
-
-        return gotScraping.stream(streamTargetUrl, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": `${BASE_URL}/`
+          if (fileResponse.statusCode !== 200 || !fileResponse.body || fileResponse.body.length === 0) {
+            return res.status(404).send("Subtitle file not found or empty on storage.");
           }
-        }).pipe(res);
+
+          res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+          res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+          res.setHeader("Content-Length", fileResponse.body.length);
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Cache-Control", "public, max-age=86400");
+
+          return res.end(fileResponse.body);
+        } catch (subErr) {
+          return res.status(502).send("Failed to stream subtitle file: " + subErr.message);
+        }
       }
 
-      // ── 2. Parameter Normalization & Extraction ───────────────────────────
+      // ── 2. Parameter Extraction & Normalization ───────────────────────────
       let inputParam = (req.query.tmdbId || req.query.id || req.query.url || req.query.slug || "").trim();
 
       if (!inputParam) {
@@ -48,21 +57,18 @@ module.exports = {
       let pageUrl = "";
       let slug = "";
 
-      // පරිශීලකයා URL එකක් ලබා දී ඇත්නම්
       if (inputParam.startsWith("http://") || inputParam.startsWith("https://")) {
         pageUrl = inputParam;
         const urlObj = new URL(pageUrl);
         slug = urlObj.pathname.replace(/^\/|\/$/g, "");
       } else if (isNaN(Number(inputParam))) {
-        // පරිශීලකයා slug එකක් ලබා දී ඇත්නම් (e.g. spider-man-2002-sinhala-subtitles)
         slug = inputParam;
         pageUrl = `${BASE_URL}/${slug}`;
       } else {
-        // පිරිසිදු අංකයක් ලබා දී ඇත්නම් (e.g. 557)
         tmdbId = inputParam;
       }
 
-      // ── 3. Page එක Fetch කර Token එක සහ TMDB ID එක සෙවීම ─────────────────
+      // ── 3. Page Scrape & Token Resolver ──────────────────────────────────
       let token = null;
 
       if (pageUrl) {
@@ -77,14 +83,11 @@ module.exports = {
           });
 
           const html = pageRes.body;
-
-          // HTML තුළින් Firebase token එක සොයා ගැනීම
           const tokenMatch = html.match(/token=([a-f0-9\-]{36})/i) || html.match(/token=([a-f0-9\-]+)/i);
           if (tokenMatch) {
             token = tokenMatch[1];
           }
 
-          // HTML එකෙන් tmdbId එක සොයා ගැනීම (vidlink.pro/movie/{id})
           if (!tmdbId) {
             const tmdbMatch = html.match(/vidlink\.pro\/movie\/(\d+)/i) || html.match(/\/movie\/(\d+)/i);
             if (tmdbMatch) {
@@ -94,7 +97,7 @@ module.exports = {
         } catch (_) {}
       }
 
-      // Slug එකෙන් TMDB ID එකක් සොයා ගැනීමට TMDB Search fallback එක
+      // TMDB search fallback using slug
       if (!tmdbId && slug) {
         try {
           const cleanName = slug
@@ -114,7 +117,7 @@ module.exports = {
         } catch (_) {}
       }
 
-      // Fallback known token for Spider-Man (2002)
+      // Spider-Man (2002) fallback token
       if (!token && String(tmdbId) === '557') {
         token = 'af5c973c-3a2a-4938-ba6a-72ce86057df1';
       }
@@ -157,12 +160,10 @@ module.exports = {
       const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      // Direct force-download stream URLs through our gateway
+      // Subtitle Direct Auto-Download Gateway Link
       const directDownloadSubUrl = hasSub
         ? `${currentHost}/api/v1/movies/cinesub/resolve?stream=${encodeURIComponent(potentialSubUrl)}&filename=CineSub_${tmdbId}_Sinhala.vtt${apiKeyParam}`
         : null;
-
-      const directDownloadPlayerStreamUrl = `${currentHost}/api/v1/movies/cinesub/resolve?stream=${encodeURIComponent(rawPlayerUrl)}&filename=CineSub_Player_${tmdbId}.html${apiKeyParam}`;
 
       return res.json({
         success: true,
@@ -172,11 +173,10 @@ module.exports = {
         statusMessage: hasSub ? "සිංහල උපසිරැසි (Sinhala Subtitle) පවතී." : "මෙම චිත්‍රපටය සඳහා සිංහල උපසිරැසි (Subtitle) නොමැත.",
         downloads: {
           DirectDownloadSubtitleUrl: directDownloadSubUrl,
-          DirectDownloadPlayerStreamUrl: directDownloadPlayerStreamUrl,
           rawSubtitleUrl: hasSub ? potentialSubUrl : null
         },
         player: {
-          rawwebPlayerUrl: rawPlayerUrl
+          webPlayerUrl: rawPlayerUrl
         }
       });
 
