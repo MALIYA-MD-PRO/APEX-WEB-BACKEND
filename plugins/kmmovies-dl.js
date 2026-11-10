@@ -1,36 +1,28 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * CLI script එකෙහි සාර්ථක වූ 4-Step SkyDrop Session Resolver
- */
 async function bypassSkydrop(magicLinkUrl, gotScraping) {
   try {
-    // 1. MagicLinks පිටුව ලබා ගැනීම
     const magicRes = await gotScraping.get(magicLinkUrl, {
       headers: {
         "User-Agent": USER_AGENT,
         "Referer": "https://kmmovies.beer/"
       },
-      timeout: { request: 12000 }
+      timeout: { request: 10000 }
     });
 
     const $ = cheerio.load(magicRes.body);
-
-    // Button text හෝ href එකෙන් SKYDROP URL එක සෙවීම
     let skydropUrl = "";
+
     $(".download-button").each((_, el) => {
       const text = $(el).text().trim().toUpperCase();
       const href = $(el).attr("href");
-      if (text.includes("SKYDROP") && href) {
-        skydropUrl = href;
-      }
+      if (text.includes("SKYDROP") && href) skydropUrl = href;
     });
 
-    // Fallback search
     if (!skydropUrl) {
       $('a[href*="skydrop"]').each((_, el) => {
         const href = $(el).attr("href");
@@ -40,20 +32,16 @@ async function bypassSkydrop(magicLinkUrl, gotScraping) {
 
     if (!skydropUrl) return null;
 
-    const baseUrl = new URL(skydropUrl).origin; // https://w1.skydrop.sbs
+    const baseUrl = new URL(skydropUrl).origin;
 
-    // Step 1: Initial load to get the session cookie
     const res1 = await gotScraping.get(skydropUrl, {
       headers: { "User-Agent": USER_AGENT },
-      timeout: { request: 10000 }
+      timeout: { request: 8000 }
     });
 
     const rawCookies = res1.headers["set-cookie"];
-    const cookies = rawCookies
-      ? rawCookies.map((c) => c.split(";")[0]).join("; ")
-      : "";
+    const cookies = rawCookies ? rawCookies.map((c) => c.split(";")[0]).join("; ") : "";
 
-    // Step 2: POST to /resolve/ (This registers the file ID to the session)
     const resolveUrl = new URL("/resolve/", baseUrl).href;
     await axios.post(resolveUrl, "", {
       headers: {
@@ -63,10 +51,9 @@ async function bypassSkydrop(magicLinkUrl, gotScraping) {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": USER_AGENT
       },
-      timeout: 10000
+      timeout: 8000
     });
 
-    // Step 3: GET /id/ (Simulating browser redirection)
     const idUrl = new URL("/id/", baseUrl).href;
     await gotScraping.get(idUrl, {
       headers: {
@@ -74,10 +61,9 @@ async function bypassSkydrop(magicLinkUrl, gotScraping) {
         Cookie: cookies,
         "User-Agent": USER_AGENT
       },
-      timeout: 10000
+      timeout: 8000
     });
 
-    // Step 4: POST to /fetch/ to get the final Google link
     const fetchUrl = new URL("/fetch/", baseUrl).href;
     const postRes = await axios.post(fetchUrl, "", {
       headers: {
@@ -89,7 +75,7 @@ async function bypassSkydrop(magicLinkUrl, gotScraping) {
       },
       maxRedirects: 0,
       validateStatus: (status) => status >= 200 && status <= 303,
-      timeout: 15000
+      timeout: 12000
     });
 
     if ((postRes.status === 302 || postRes.status === 303) && postRes.headers.location) {
@@ -97,15 +83,31 @@ async function bypassSkydrop(magicLinkUrl, gotScraping) {
         return postRes.headers.location;
       }
     }
-
     return null;
-  } catch (err) {
+  } catch (_) {
+    return null;
+  }
+}
+
+// KMCLOUD / Encoded Direct Link Resolver (Server IP Safe)
+async function resolveEncodedDirect(kmUrl, gotScraping) {
+  try {
+    const res = await gotScraping.get(kmUrl, {
+      headers: { "User-Agent": USER_AGENT },
+      timeout: { request: 10000 }
+    });
+    const $ = cheerio.load(res.body);
+
+    const rootz = $('#rootz-direct-download').attr('href');
+    const primary = $('.btn-download-primary').attr('href');
+    return rootz || primary || null;
+  } catch (_) {
     return null;
   }
 }
 
 module.exports = {
-  name: "KMMovies · WEB-DL All Qualities",
+  name: "KMMovies · All Qualities Downloader",
   category: "movie",
   method: "GET",
   path: "/api/v1/movies/kmmovies/dl",
@@ -113,7 +115,7 @@ module.exports = {
     try {
       const { gotScraping } = await import("got-scraping");
 
-      // ── 1. Dedicated Proxy Force Auto-Download Streamer ──────────────────
+      // ── 1. Streaming Proxy Gateway ───────────────────────────────────────
       if (req.query.stream) {
         const streamTargetUrl = decodeURIComponent(req.query.stream);
         const fileName = req.query.filename || `KMMovies_${Date.now()}.mp4`;
@@ -124,55 +126,45 @@ module.exports = {
         res.setHeader("Cache-Control", "public, max-age=86400");
 
         return gotScraping.stream(streamTargetUrl, {
-          headers: {
-            "User-Agent": USER_AGENT
-          }
+          headers: { "User-Agent": USER_AGENT }
         }).pipe(res);
       }
 
       // ── 2. Movie Link Resolution ─────────────────────────────────────────
       let movieUrl = (req.query.url || "").trim();
       if (!movieUrl) {
-        return res.status(400).json({
-          success: false,
-          error: "Parameter 'url' is required (e.g. https://kmmovies.beer/leo-2023/)"
-        });
+        return res.status(400).json({ success: false, error: "Parameter 'url' is required" });
       }
 
-      // Trailing slash නිවැරදි කිරීම (WordPress query break නොවීමට)
-      if (!movieUrl.endsWith("/")) {
-        movieUrl += "/";
-      }
+      if (!movieUrl.endsWith("/")) movieUrl += "/";
 
       const moviePageRes = await gotScraping.get(movieUrl, {
         headers: { "User-Agent": USER_AGENT },
         timeout: { request: 15000 }
       });
       const $ = cheerio.load(moviePageRes.body);
-
       const title = $("h1.entry-title").first().text().trim() || $("title").text().trim();
-      const rawWebDlItems = [];
 
-      // WEB-DL Versions පමණක් වෙන් කර ගැනීම
+      const allItems = [];
+
+      // WEB-DL Versions
       $(".download-category.webdl .dl-btn").each((_, el) => {
         const resQuality = $(el).find(".dl-res").text().trim() || "WEB-DL";
         const size = $(el).find(".dl-size").text().trim() || "Unknown";
-        const magicUrl = $(el).attr("href");
-
-        if (magicUrl) {
-          rawWebDlItems.push({
-            quality: resQuality,
-            size,
-            magicUrl
-          });
-        }
+        const url = $(el).attr("href");
+        if (url) allItems.push({ type: "WEB-DL", quality: resQuality, size, url });
       });
 
-      if (rawWebDlItems.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: "No WEB-DL download links found on this movie page."
-        });
+      // Encoded Versions (Fallback / Direct Rootz Support)
+      $(".download-category.encoded .dl-btn").each((_, el) => {
+        const resQuality = $(el).find(".dl-res").text().trim() || "Encoded";
+        const size = $(el).find(".dl-size").text().trim() || "Unknown";
+        const url = $(el).attr("href");
+        if (url) allItems.push({ type: "Encoded (Rootz Direct)", quality: resQuality, size, url });
+      });
+
+      if (allItems.length === 0) {
+        return res.status(404).json({ success: false, error: "No download links found on this movie page." });
       }
 
       const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
@@ -180,28 +172,32 @@ module.exports = {
       const currentHost = `${protocol}://${host}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      // SkyDrop එක Block නොවීමට sequential loop එකකින් resolve කිරීම
       const resolvedDownloads = [];
-      for (let i = 0; i < rawWebDlItems.length; i++) {
-        const item = rawWebDlItems[i];
-        const directGoogleUrl = await bypassSkydrop(item.magicUrl, gotScraping);
+
+      for (let i = 0; i < allItems.length; i++) {
+        const item = allItems[i];
+        let directUrl = null;
+
+        if (item.type === "WEB-DL") {
+          directUrl = await bypassSkydrop(item.url, gotScraping);
+        } else {
+          directUrl = await resolveEncodedDirect(item.url, gotScraping);
+        }
 
         const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
-        const fileName = `${safeTitle}_${item.quality.replace(/\s+/g, "_")}_${i + 1}.mp4`;
+        const fileName = `${safeTitle}_${item.quality.replace(/\s+/g, "_")}.mp4`;
 
         resolvedDownloads.push({
+          type: item.type,
           quality: item.quality,
           size: item.size,
-          directDownloadUrl: directGoogleUrl,
-          autoDownloadUrl: directGoogleUrl
-            ? `${currentHost}/api/v1/movies/kmmovies/dl?stream=${encodeURIComponent(directGoogleUrl)}&filename=${fileName}${apiKeyParam}`
+          directDownloadUrl: directUrl,
+          autoDownloadUrl: directUrl
+            ? `${currentHost}/api/v1/movies/kmmovies/dl?stream=${encodeURIComponent(directUrl)}&filename=${fileName}${apiKeyParam}`
             : null
         });
 
-        // Request sessions අතර කෙටි delay එකක් (SkyDrop spam-block නොවීමට)
-        if (i < rawWebDlItems.length - 1) {
-          await sleep(500);
-        }
+        await sleep(350);
       }
 
       return res.json({
@@ -215,7 +211,7 @@ module.exports = {
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "KMMovies WEB-DL Processing Failed: " + err.message
+        error: "KMMovies Resolution Failed: " + err.message
       });
     }
   }
