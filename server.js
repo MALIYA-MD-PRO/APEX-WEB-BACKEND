@@ -79,7 +79,9 @@ const SYSTEM_ENDPOINTS = [
   { id: 'cinesub-search', name: 'CineSub · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesub/search' },
   { id: 'cinesub-resolve', name: 'CineSub · Resolve Links', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cinesub/resolve' },
   { id: 'kmmovies-search', name: 'KMMovies · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/kmmovies/search' },
-  { id: 'kmmovies-dl', name: 'KMMovies · WEB-DL DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/kmmovies/dl' }
+  { id: 'kmmovies-dl', name: 'KMMovies · WEB-DL DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/kmmovies/dl' },
+  { id: 'cartoonslk-search', name: 'Cartoons.lk · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cartoonslk/search' },
+  { id: 'cartoonslk-dl', name: 'Cartoons.lk · Direct DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cartoonslk/dl' }
 ];
 
 // ══════════════════════════════════════════════════════════════
