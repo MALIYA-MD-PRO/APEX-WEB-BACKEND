@@ -92,3 +92,88 @@ module.exports = {
         }
         return response;
       });
+
+      const { data } = await client.get(url);
+      const $ = cheerio.load(data);
+
+      const title = $("h1.title span").first().text().trim() || $("title").text().replace("- Pornhub.com", "").trim();
+      const thumbnail = $('meta[property="og:image"]').attr("content") || null;
+
+      const scripts = $("script").map((_, el) => $(el).html()).get();
+      let mediaDefinitions = null;
+
+      for (const s of scripts) {
+        if (s && s.includes("mediaDefinitions")) {
+          mediaDefinitions = extractMediaDefinitions(s);
+          if (mediaDefinitions) break;
+        }
+      }
+
+      if (!mediaDefinitions) {
+        return res.status(404).json({
+          success: false,
+          error: "Could not extract media definitions from this page."
+        });
+      }
+
+      const mp4Endpoint = mediaDefinitions.find((d) => d.format === "mp4" && d.videoUrl);
+      if (!mp4Endpoint) {
+        return res.status(404).json({
+          success: false,
+          error: "MP4 stream endpoint not found."
+        });
+      }
+
+      const mp4Res = await client.get(mp4Endpoint.videoUrl, {
+        headers: {
+          "Referer": url,
+          "Cookie": sessionCookies,
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      });
+
+      const validQualities = (mp4Res.data || []).filter((d) => d.videoUrl);
+
+      if (!validQualities.length) {
+        return res.status(404).json({
+          success: false,
+          error: "No downloadable MP4 resolutions found."
+        });
+      }
+
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+      const host = req.get("host");
+      const currentHost = `${protocol}://${host}`;
+      // Dynamic path detection: දැනට request එක ආව path එකම (/api/v1/adult/ph/dl) භාවිතා කරයි
+      const currentPath = req.originalUrl.split("?")[0];
+      const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
+      const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
+
+      const downloads = validQualities.map((q) => {
+        const qualityLabel = `${q.quality}p`;
+        const fileName = `${safeTitle}_${qualityLabel}.mp4`;
+
+        return {
+          quality: qualityLabel,
+          directUrl: q.videoUrl,
+          streamUrl: `${currentHost}${currentPath}?stream=${encodeURIComponent(q.videoUrl)}&ref=${encodeURIComponent(url)}&filename=${fileName}${apiKeyParam}`
+        };
+      });
+
+      return res.json({
+        success: true,
+        title,
+        thumbnail,
+        pageUrl: url,
+        totalQualities: downloads.length,
+        downloads
+      });
+
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: "Extraction Failed: " + err.message
+      });
+    }
+  }
+};
