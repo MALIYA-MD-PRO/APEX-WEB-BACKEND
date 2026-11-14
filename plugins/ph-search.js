@@ -53,7 +53,6 @@ module.exports = {
         const imgEl = container.find("img").first();
         const thumbnail = imgEl.attr("data-src") || imgEl.attr("data-mediumthumb") || imgEl.attr("src") || null;
 
-        // Avoid duplicates
         if (!results.some((r) => r.url === fullUrl)) {
           results.push({
             index: results.length + 1,
@@ -64,7 +63,8 @@ module.exports = {
             rating,
             thumbnail,
             url: fullUrl,
-            dlEndpoint: `${currentHost}/api/v1/media/ph/dl?url=${encodeURIComponent(fullUrl)}${apiKeyParam}`
+            // නිවැරදි /api/v1/adult/ph/dl path එකට යොමු කිරීම
+            dlEndpoint: `${currentHost}/api/v1/adult/ph/dl?url=${encodeURIComponent(fullUrl)}${apiKeyParam}`
           });
         }
       });
