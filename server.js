@@ -82,8 +82,8 @@ const SYSTEM_ENDPOINTS = [
   { id: 'kmmovies-dl', name: 'KMMovies · WEB-DL DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/kmmovies/dl' },
   { id: 'cartoonslk-search', name: 'Cartoons.lk · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cartoonslk/search' },
   { id: 'cartoonslk-dl', name: 'Cartoons.lk · Direct DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cartoonslk/dl' },
-  { id: 'ph-search', name: 'PH · Search', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/ph/search' },
-  { id: 'ph-dl', name: 'PH · Direct & Stream DL', category: 'media', categoryLabel: 'Media', path: '/api/v1/media/ph/dl' }
+  { id: 'ph-search', name: 'PH · Video Search (Top 25)', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/search' },
+  { id: 'ph-dl', name: 'PH · Direct & Stream DL', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/dl' }
 ];
 
 // ══════════════════════════════════════════════════════════════
