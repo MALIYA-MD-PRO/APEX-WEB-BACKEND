@@ -28,9 +28,9 @@ function extractMediaDefinitions(s) {
 
 module.exports = {
   name: "PH · Direct & Stream Downloader",
-  category: "media",
+  category: "adult",
   method: "GET",
-  path: "/api/v1/media/ph/dl",
+  path: "/api/v1/adult/ph/dl",
   handler: async (req, res) => {
     try {
       // ── 1. Dedicated Stream Proxy Gateway (Force Auto-Download) ──────────
