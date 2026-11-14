@@ -1,34 +1,39 @@
+const axios = require("axios");
 const cheerio = require("cheerio");
 
 const BASE_URL = "https://cartoons.lk";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-async function resolveSingleOption(details, option, gotScraping) {
+const client = axios.create({
+  baseURL: BASE_URL,
+  headers: {
+    "User-Agent": USER_AGENT,
+    "Accept-Language": "en-US,en;q=0.9",
+  },
+  timeout: 12000,
+});
+
+async function resolveSingleOption(details, option) {
   try {
-    const formBody = new URLSearchParams({
-      action: "get_movie_link",
-      nonce: details.nonce,
-      post_id: details.postId,
-      type: details.type,
-      action_type: "download",
-      link_index: String(option.link_index)
-    }).toString();
+    // 2nd script එකේ වගේම FormData පාවිච්චි කරන්න
+    const formData = new FormData();
+    formData.append("action", "get_movie_link");
+    formData.append("nonce", details.nonce);
+    formData.append("post_id", details.postId);
+    formData.append("type", details.type);
+    formData.append("action_type", "download");
+    formData.append("link_index", String(option.link_index));
 
     // Step A: Call admin-ajax.php
-    const ajaxRes = await gotScraping.post(`${BASE_URL}/wp-admin/admin-ajax.php`, {
-      body: formBody,
+    const ajaxRes = await client.post("/wp-admin/admin-ajax.php", formData, {
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": USER_AGENT,
         "Referer": details.movieUrl,
         "Origin": BASE_URL,
-        ...(details.cookies && { "Cookie": details.cookies })
+        ...(details.cookies && { "Cookie": details.cookies }),
       },
-      responseType: "json",
-      timeout: { request: 12000 }
     });
 
-    const ajaxData = ajaxRes.body;
+    const ajaxData = ajaxRes.data;
     if (!ajaxData || !ajaxData.success || !ajaxData.data?.url) {
       return null;
     }
@@ -45,29 +50,29 @@ async function resolveSingleOption(details, option, gotScraping) {
       return { provider, finalUrl: dlTokenUrl };
     }
 
-    // Step B: Follow 302 redirect from cartoons.lk/dl/... -> workers.dev/d/...
-    const step1 = await gotScraping.get(dlTokenUrl, {
-      followRedirect: false,
-      throwHttpErrors: false,
+    // Step B: cartoons.lk/dl/... -> workers.dev/d/...
+    const step1 = await axios.get(dlTokenUrl, {
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400,
       headers: {
         "User-Agent": USER_AGENT,
         "Referer": details.movieUrl,
-        ...(combinedCookies && { "Cookie": combinedCookies })
+        ...(combinedCookies && { "Cookie": combinedCookies }),
       },
-      timeout: { request: 10000 }
+      timeout: 10000,
     });
 
     const workerDUrl = step1.headers.location;
     if (!workerDUrl) return { provider, finalUrl: dlTokenUrl };
 
-    // Step C: Follow 302 redirect from workers.dev/d/... -> workers.dev/s/... (Final MP4)
-    const step2 = await gotScraping.get(workerDUrl, {
-      followRedirect: false,
-      throwHttpErrors: false,
+    // Step C: workers.dev/d/... -> workers.dev/s/...
+    const step2 = await axios.get(workerDUrl, {
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400,
       headers: {
-        "User-Agent": USER_AGENT
+        "User-Agent": USER_AGENT,
       },
-      timeout: { request: 10000 }
+      timeout: 10000,
     });
 
     const finalDirectUrl = step2.headers.location || workerDUrl;
@@ -85,21 +90,31 @@ module.exports = {
   path: "/api/v1/movies/cartoonslk/dl",
   handler: async (req, res) => {
     try {
-      const { gotScraping } = await import("got-scraping");
-
       // ── 1. Dedicated Proxy Force Auto-Download Streamer ──────────────────
       if (req.query.stream) {
         const streamTargetUrl = decodeURIComponent(req.query.stream);
         const fileName = req.query.filename || `CartoonsLK_${Date.now()}.mp4`;
 
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Type", "video/mp4");
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=86400");
+        const streamResponse = await axios.get(streamTargetUrl, {
+          responseType: "stream",
+          headers: {
+            "User-Agent": USER_AGENT,
+            // Range header එක pass කළොත් pause/resume (IDM වගේ) වැඩ කරනවා
+            ...(req.headers.range && { Range: req.headers.range }),
+          },
+        });
 
-        return gotScraping.stream(streamTargetUrl, {
-          headers: { "User-Agent": USER_AGENT }
-        }).pipe(res);
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Content-Type", streamResponse.headers["content-type"] || "video/mp4");
+        if (streamResponse.headers["content-length"]) {
+          res.setHeader("Content-Length", streamResponse.headers["content-length"]);
+        }
+        if (streamResponse.headers["content-range"]) {
+          res.setHeader("Content-Range", streamResponse.headers["content-range"]);
+          res.status(206);
+        }
+
+        return streamResponse.data.pipe(res);
       }
 
       // ── 2. Fetch Movie Details & Resolve All Qualities ───────────────────
@@ -107,19 +122,12 @@ module.exports = {
       if (!movieUrl) {
         return res.status(400).json({
           success: false,
-          error: "Parameter 'url' is required (e.g. https://cartoons.lk/movies/...)"
+          error: "Parameter 'url' is required (e.g. https://cartoons.lk/movies/...)",
         });
       }
 
-      const pageRes = await gotScraping.get(movieUrl, {
-        headers: {
-          "User-Agent": USER_AGENT,
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        timeout: { request: 12000 }
-      });
-
-      const html = pageRes.body;
+      const pageRes = await client.get(movieUrl);
+      const html = pageRes.data;
       const $ = cheerio.load(html);
 
       const cookies = pageRes.headers["set-cookie"]
@@ -147,14 +155,14 @@ module.exports = {
           label: $(".movie-title").text().split("|")[2]?.trim() || "Default Quality",
           file_size: $(".movie-title").text().split("|")[3]?.trim() || "Unknown",
           provider: dlBtn.attr("data-provider") || "direct",
-          link_index: parseInt(dlBtn.attr("data-link-index") || "0", 10)
+          link_index: parseInt(dlBtn.attr("data-link-index") || "0", 10),
         });
       }
 
       if (!postId || !nonce || rawLinks.length === 0) {
         return res.status(404).json({
           success: false,
-          error: "No direct download options found (might be a TV Series with episodes)."
+          error: "No direct download options found (might be a TV Series with episodes).",
         });
       }
 
@@ -165,24 +173,24 @@ module.exports = {
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
       const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
 
-      // සියලුම Qualities එකවර resolve කිරීම
-      const resolvedResults = await Promise.all(
-        rawLinks.map(async (opt, idx) => {
-          const resolved = await resolveSingleOption(details, opt, gotScraping);
-          const qualityLabel = opt.label || `Quality_${idx + 1}`;
-          const fileName = `${safeTitle}_${qualityLabel.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp4`;
+      // Promise.all වෙනුවට එකින් එක (Sequential) resolve කිරීම
+      const resolvedResults = [];
+      for (let idx = 0; idx < rawLinks.length; idx++) {
+        const opt = rawLinks[idx];
+        const resolved = await resolveSingleOption(details, opt);
+        const qualityLabel = opt.label || `Quality_${idx + 1}`;
+        const fileName = `${safeTitle}_${qualityLabel.replace(/[^a-zA-Z0-9_-]/g, "_")}.mp4`;
 
-          return {
-            quality: qualityLabel,
-            size: opt.file_size || "Unknown",
-            provider: (resolved?.provider || opt.provider || "direct").toUpperCase(),
-            directDownloadUrl: resolved?.finalUrl || null,
-            autoDownloadUrl: resolved?.finalUrl
-              ? `${currentHost}/api/v1/movies/cartoonslk/dl?stream=${encodeURIComponent(resolved.finalUrl)}&filename=${fileName}${apiKeyParam}`
-              : null
-          };
-        })
-      );
+        resolvedResults.push({
+          quality: qualityLabel,
+          size: opt.file_size || "Unknown",
+          provider: (resolved?.provider || opt.provider || "direct").toUpperCase(),
+          directDownloadUrl: resolved?.finalUrl || null,
+          autoDownloadUrl: resolved?.finalUrl
+            ? `${currentHost}/api/v1/movies/cartoonslk/dl?stream=${encodeURIComponent(resolved.finalUrl)}&filename=${fileName}${apiKeyParam}`
+            : null,
+        });
+      }
 
       return res.json({
         success: true,
@@ -190,14 +198,14 @@ module.exports = {
         poster,
         movieUrl,
         totalLinks: resolvedResults.length,
-        downloads: resolvedResults
+        downloads: resolvedResults,
       });
 
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "Cartoons.lk Download Resolution Failed: " + err.message
+        error: "Cartoons.lk Download Resolution Failed: " + err.message,
       });
     }
-  }
+  },
 };
