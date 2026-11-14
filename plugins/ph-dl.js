@@ -157,7 +157,7 @@ module.exports = {
       const { data } = await client.get(url);
       const $ = cheerio.load(data);
 
-      const title = $("h1.title span").first().text().trim() \vert{}\vert{} $("title").text().replace("- Pornhub.com", "").trim();
+      const title = $("h1.title span").first().text().trim() || $("title").text().replace("- Pornhub.com", "").trim();
       const thumbnail = $('meta[property="og:image"]').attr("content") || null;
 
       // Duration නිස්සාරණය කිරීම (Script variable හෝ Meta tag වලින්)
