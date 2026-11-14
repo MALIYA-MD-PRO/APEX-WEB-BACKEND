@@ -5,9 +5,9 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 module.exports = {
   name: "PH · Video Search (Top 25)",
-  category: "media",
+  category: "adult",
   method: "GET",
-  path: "/api/v1/media/ph/search",
+  path: "/api/v1/adult/ph/search",
   handler: async (req, res) => {
     try {
       const query = req.query.q || req.query.query;
