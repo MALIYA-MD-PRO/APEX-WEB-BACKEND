@@ -1,7 +1,6 @@
 const axios = require("axios");
 
-const NEW_CINE_API = (process.env.CINESUBZ_API || "http://puka-cine-production.up.railway.app").replace(/\/+$/, "");
-const FALLBACK_IMG = "https://github.com/MALIYA-MD-PRO/images/blob/main/Gemini_Generated_Image_ljlmxoljlmxoljlm%20(1).jpg?raw=true";
+const NEW_CINE_API = (process.env.CINESUBZ_API || "https://puka-cine-production.up.railway.app").replace(/\/+$/, "");
 
 module.exports = {
   name: "CineSubz Search",
@@ -17,23 +16,31 @@ module.exports = {
 
       const response = await axios.get(`${NEW_CINE_API}/search`, {
         params: { q: query.trim() },
-        timeout: 15000
+        timeout: 20000
       });
 
-      const rawResults = response.data?.results || [];
+      if (!response.data || !response.data.success) {
+        return res.status(500).json({
+          success: false,
+          error: response.data?.error || "Failed to fetch search results"
+        });
+      }
 
-      const results = rawResults.slice(0, 15).map((item) => ({
-        title: item.title || "",
-        url: item.url || "",
-        image: item.poster || FALLBACK_IMG,
-        year: item.year || null,
-        imdb: item.imdb || null,
-        quality: item.quality || null
-      }));
+      const rawResults = Array.isArray(response.data.results) ? response.data.results : [];
+
+      const results = rawResults.map((item) => {
+        const title = item.title || "";
+        const yearMatch = title.match(/\((\d{4})\)/);
+        return {
+          title,
+          year: yearMatch ? yearMatch[1] : null,
+          url: item.url || ""
+        };
+      });
 
       return res.json({
         success: true,
-        query,
+        query: query.trim(),
         total: results.length,
         results
       });
