@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const NEW_CINE_API = (process.env.CINESUBZ_API || "http://puka-cine-production.up.railway.app").replace(/\/+$/, "");
+const NEW_CINE_API = (process.env.CINESUBZ_API || "https://puka-cine-production.up.railway.app").replace(/\/+$/, "");
 
 module.exports = {
   name: "CineSubz Resolver",
@@ -9,10 +9,18 @@ module.exports = {
   path: "/api/v1/movies/cinesubz/dl",
   handler: async (req, res) => {
     try {
-      let targetUrl = req.query.directUrl || req.query.driveUrl || req.query.ztUrl || req.query.url || req.query.pageUrl;
+      let targetUrl =
+        req.query.directUrl ||
+        req.query.driveUrl ||
+        req.query.ztUrl ||
+        req.query.url ||
+        req.query.pageUrl;
 
       if (!targetUrl) {
-        return res.status(400).json({ success: false, error: "Parameter 'directUrl' or 'url' is required" });
+        return res.status(400).json({
+          success: false,
+          error: "Parameter 'directUrl', 'driveUrl', 'ztUrl', or 'url' is required"
+        });
       }
 
       try {
@@ -23,7 +31,7 @@ module.exports = {
 
       const response = await axios.get(`${NEW_CINE_API}/download`, {
         params: { url: targetUrl },
-        timeout: 60000 // Real Chrome R2 bypass සඳහා තරමක් වැඩි timeout එකක් තබා ඇත
+        timeout: 65000 // Real Chrome R2 bypass සඳහා ප්‍රමාණවත් timeout එකක්
       });
 
       const data = response.data;
