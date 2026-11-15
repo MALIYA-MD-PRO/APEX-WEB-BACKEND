@@ -1,6 +1,7 @@
 const axios = require("axios");
 
-const NEW_CINE_API = (process.env.CINESUBZ_API || "http://puka-cine-production.up.railway.app").replace(/\/+$/, "");
+const NEW_CINE_API = (process.env.CINESUBZ_API || "https://puka-cine-production.up.railway.app").replace(/\/+$/, "");
+const FALLBACK_IMG = "https://github.com/MALIYA-MD-PRO/images/blob/main/Gemini_Generated_Image_ljlmxoljlmxoljlm%20(1).jpg?raw=true";
 
 module.exports = {
   name: "CineSubz Info",
@@ -16,7 +17,7 @@ module.exports = {
 
       const response = await axios.get(`${NEW_CINE_API}/qualities`, {
         params: { url: targetUrl.trim() },
-        timeout: 25000
+        timeout: 30000
       });
 
       const data = response.data;
@@ -29,10 +30,8 @@ module.exports = {
 
       const movie = data.movie || {};
       const details = movie.details || {};
-      const isTvShow = Boolean(data.isTvShow || (Array.isArray(data.seasons) && data.seasons.length > 0));
-
-      // Downloads mapping (පරණ format එකයි අලුත් details සියල්ලයි ඇතුළත්ව)
       const rawDownloads = Array.isArray(data.downloads) ? data.downloads : [];
+
       const downloadLinks = rawDownloads.map((item) => ({
         label: item.label || item.quality || "Quality",
         quality: item.quality || item.label || "Quality",
@@ -40,19 +39,16 @@ module.exports = {
         language: item.language || null,
         ztUrl: item.ztUrl || null,
         driveUrl: item.driveUrl || null,
-        pageUrl: item.ztUrl || targetUrl,
+        pageUrl: item.ztUrl || targetUrl.trim(),
         directUrl: item.driveUrl || item.ztUrl
       }));
 
-      const seasons = Array.isArray(data.seasons) ? data.seasons : [];
-
       return res.json({
         success: true,
-        isTvShow,
         title: movie.title || "Title",
         tagline: movie.tagline || null,
         url: movie.url || targetUrl.trim(),
-        poster: movie.poster || null,
+        poster: movie.poster || FALLBACK_IMG,
         backdrop: movie.backdrop || null,
         synopsis: movie.synopsis || null,
         details: {
@@ -66,20 +62,13 @@ module.exports = {
           director: details.director || null,
           subtitleBy: details.subtitleBy || null,
           country: details.country || null,
-          genres: Array.isArray(details.genres) ? details.genres : [],
-          ...details // Upstream එකෙන් තවත් අමතර fields ආවොත් ඒවාත් ඉබේම එකතු වේ
+          genres: Array.isArray(details.genres) ? details.genres : []
         },
         cast: Array.isArray(movie.cast) ? movie.cast : [],
         gallery: Array.isArray(movie.gallery) ? movie.gallery : [],
-        ...(isTvShow
-          ? {
-              totalSeasons: seasons.length,
-              seasons
-            }
-          : {}),
         totalQualities: downloadLinks.length,
         downloadLinks,
-        downloads: rawDownloads // අලුත් API එකේ raw downloads array එකත් ඒ විදියටම
+        downloads: rawDownloads
       });
     } catch (err) {
       return res.status(500).json({
