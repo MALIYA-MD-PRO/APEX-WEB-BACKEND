@@ -15,9 +15,10 @@ module.exports = {
         return res.status(400).json({ success: false, error: "Parameter 'url' is required" });
       }
 
-      const response = await axios.get(`${NEW_CINE_API}/qualities`, {
-        params: { url: targetUrl.trim() },
-        timeout: 30000
+      const cleanUrl = targetUrl.trim();
+      const response = await axios.get(`${NEW_CINE_API}/info`, {
+        params: { url: cleanUrl },
+        timeout: 35000
       });
 
       const data = response.data;
@@ -28,9 +29,20 @@ module.exports = {
         });
       }
 
-      const movie = data.movie || {};
-      const details = movie.details || {};
+      const content = data.movie || data.tvshow || data.show || data.data || {};
+      const details = content.details || {};
       const rawDownloads = Array.isArray(data.downloads) ? data.downloads : [];
+      const rawSeasons = Array.isArray(data.seasons)
+        ? data.seasons
+        : Array.isArray(content.seasons)
+        ? content.seasons
+        : [];
+
+      const isTvShow =
+        data.type === "tvshow" ||
+        rawSeasons.length > 0 ||
+        cleanUrl.includes("/tvshows/") ||
+        cleanUrl.includes("/series/");
 
       const downloadLinks = rawDownloads.map((item) => ({
         label: item.label || item.quality || "Quality",
@@ -39,18 +51,35 @@ module.exports = {
         language: item.language || null,
         ztUrl: item.ztUrl || null,
         driveUrl: item.driveUrl || null,
-        pageUrl: item.ztUrl || targetUrl.trim(),
+        pageUrl: item.ztUrl || cleanUrl,
         directUrl: item.driveUrl || item.ztUrl
       }));
 
+      const seasons = rawSeasons.map((s, idx) => {
+        const seasonNum = s.season || s.seasonNumber || idx + 1;
+        const seasonUrl =
+          s.url ||
+          s.seasonUrl ||
+          `${cleanUrl.replace(/\/+$/, "")}/?season=${seasonNum}`;
+
+        return {
+          season: seasonNum,
+          title: s.title || s.name || `Season ${seasonNum}`,
+          episodeCount: s.episodeCount || (Array.isArray(s.episodes) ? s.episodes.length : null),
+          url: seasonUrl,
+          episodes: Array.isArray(s.episodes) ? s.episodes : undefined
+        };
+      });
+
       return res.json({
         success: true,
-        title: movie.title || "Title",
-        tagline: movie.tagline || null,
-        url: movie.url || targetUrl.trim(),
-        poster: movie.poster || FALLBACK_IMG,
-        backdrop: movie.backdrop || null,
-        synopsis: movie.synopsis || null,
+        type: isTvShow ? "tvshow" : "movie",
+        title: content.title || data.title || "Title",
+        tagline: content.tagline || null,
+        url: content.url || cleanUrl,
+        poster: content.poster || data.poster || FALLBACK_IMG,
+        backdrop: content.backdrop || null,
+        synopsis: content.synopsis || data.synopsis || null,
         details: {
           imdbId: details.imdbId || null,
           imdbRating: details.imdbRating || null,
@@ -64,11 +93,18 @@ module.exports = {
           country: details.country || null,
           genres: Array.isArray(details.genres) ? details.genres : []
         },
-        cast: Array.isArray(movie.cast) ? movie.cast : [],
-        gallery: Array.isArray(movie.gallery) ? movie.gallery : [],
-        totalQualities: downloadLinks.length,
-        downloadLinks,
-        downloads: rawDownloads
+        cast: Array.isArray(content.cast) ? content.cast : [],
+        gallery: Array.isArray(content.gallery) ? content.gallery : [],
+        ...(isTvShow
+          ? {
+              totalSeasons: seasons.length,
+              seasons
+            }
+          : {
+              totalQualities: downloadLinks.length,
+              downloadLinks,
+              downloads: rawDownloads
+            })
       });
     } catch (err) {
       return res.status(500).json({
