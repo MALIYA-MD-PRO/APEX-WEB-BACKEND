@@ -30,11 +30,18 @@ module.exports = {
 
       const results = rawResults.map((item) => {
         const title = item.title || "";
+        const url = item.url || "";
         const yearMatch = title.match(/\((\d{4})\)/);
+        const detectedType =
+          item.type ||
+          (url.includes("/tvshows/") || url.includes("/series/") ? "tvshow" : "movie");
+
         return {
           title,
-          year: yearMatch ? yearMatch[1] : null,
-          url: item.url || ""
+          type: detectedType,
+          year: item.year || (yearMatch ? yearMatch[1] : null),
+          poster: item.poster || item.thumbnail || null,
+          url
         };
       });
 
