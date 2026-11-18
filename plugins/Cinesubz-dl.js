@@ -10,16 +10,16 @@ module.exports = {
   handler: async (req, res) => {
     try {
       let targetUrl =
+        req.query.url ||
         req.query.directUrl ||
         req.query.driveUrl ||
         req.query.ztUrl ||
-        req.query.url ||
         req.query.pageUrl;
 
       if (!targetUrl) {
         return res.status(400).json({
           success: false,
-          error: "Parameter 'directUrl', 'driveUrl', 'ztUrl', or 'url' is required"
+          error: "Parameter 'url' (or 'directUrl', 'driveUrl', 'ztUrl') is required"
         });
       }
 
@@ -29,23 +29,61 @@ module.exports = {
         targetUrl = String(targetUrl).trim();
       }
 
+      const isSeasonBatch = /[?&]season=\d+/i.test(targetUrl);
+
       const response = await axios.get(`${NEW_CINE_API}/download`, {
         params: { url: targetUrl },
-        timeout: 65000 // Real Chrome R2 bypass සඳහා ප්‍රමාණවත් timeout එකක්
+        timeout: isSeasonBatch ? 180000 : 75000
       });
 
       const data = response.data;
-      if (!data || !data.success || !data.downloadUrl) {
+      if (!data || !data.success) {
+        return res.status(500).json({
+          success: false,
+          error: data?.error || "Failed to resolve download link(s)"
+        });
+      }
+
+      // 📺 Case 1: TV Show Season Link (?season=X)
+      const rawEpisodes = Array.isArray(data.episodes)
+        ? data.episodes
+        : Array.isArray(data.results)
+        ? data.results
+        : null;
+
+      if (isSeasonBatch || rawEpisodes) {
+        const episodes = (rawEpisodes || []).map((ep, index) => ({
+          episode: ep.episode || ep.episodeNumber || index + 1,
+          title: ep.title || `Episode ${ep.episode || index + 1}`,
+          quality: ep.quality || null,
+          size: ep.size || null,
+          driveUrl: ep.driveUrl || ep.ztUrl || null,
+          directDownloadUrl: ep.downloadUrl || ep.directDownloadUrl || ep.url || null
+        }));
+
+        return res.json({
+          success: true,
+          type: "tvshow_season",
+          season: data.season || (targetUrl.match(/[?&]season=(\d+)/i)?.[1] ?? null),
+          seasonUrl: targetUrl,
+          totalEpisodes: episodes.length,
+          episodes,
+          expiresIn: 3600
+        });
+      }
+
+      // 🎬 Case 2: Single Movie Drive/ZT Link
+      const directDownloadUrl = data.downloadUrl || data.directDownloadUrl;
+      if (!directDownloadUrl) {
         return res.status(500).json({
           success: false,
           error: data?.error || "Failed to resolve direct R2 download link"
         });
       }
 
-      const directDownloadUrl = data.downloadUrl;
-
       return res.json({
         success: true,
+        type: "movie",
         inputType: data.inputType || "driveUrl",
         driveUrl: data.driveUrl || targetUrl,
         directDownloadUrl,
