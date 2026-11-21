@@ -85,8 +85,10 @@ const SYSTEM_ENDPOINTS = [
   { id: 'ph-search', name: 'PH · Video Search (Top 25)', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/search' },
   { id: 'ph-dl', name: 'PH · Direct & Stream DL', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/dl' },
   { id: 'moviebox-search', name: 'MovieBox · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/search' },
-  { id: 'moviebox-detail', name: 'MovieBox · Info & Episodes', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/detail' },
-  { id: 'moviebox-dl', name: 'MovieBox · Streams & Subtitles', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/dl' }
+  { id: 'moviebox-detail', name: 'MovieBox · Full Metadata & Dubs', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/detail' },
+  { id: 'moviebox-epi', name: 'MovieBox · TV Series Seasons', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/epi' },
+  { id: 'moviebox-dl', name: 'MovieBox · Movie & Batch Series DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/dl' },
+  { id: 'moviebox-sub', name: 'MovieBox · Subtitle Cache Server', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/sub' }
 ];
 
 // ══════════════════════════════════════════════════════════════
