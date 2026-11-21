@@ -83,7 +83,10 @@ const SYSTEM_ENDPOINTS = [
   { id: 'cartoonslk-search', name: 'Cartoons.lk · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cartoonslk/search' },
   { id: 'cartoonslk-dl', name: 'Cartoons.lk · Direct DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/cartoonslk/dl' },
   { id: 'ph-search', name: 'PH · Video Search (Top 25)', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/search' },
-  { id: 'ph-dl', name: 'PH · Direct & Stream DL', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/dl' }
+  { id: 'ph-dl', name: 'PH · Direct & Stream DL', category: 'adult', categoryLabel: 'Adult (18+)', path: '/api/v1/adult/ph/dl' },
+  { id: 'moviebox-search', name: 'MovieBox · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/search' },
+  { id: 'moviebox-detail', name: 'MovieBox · Info & Episodes', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/detail' },
+  { id: 'moviebox-dl', name: 'MovieBox · Streams & Subtitles', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/dl' }
 ];
 
 // ══════════════════════════════════════════════════════════════
