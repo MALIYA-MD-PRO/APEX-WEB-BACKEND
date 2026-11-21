@@ -4,6 +4,12 @@ const UPSTREAM_BASE = "https://moviebox-api-production-a558ac84.up.railway.app";
 const CACHE_TTL_MS = 30 * 60 * 1000; // මිනිත්තු 30
 const subCache = new Map();
 
+const DEFAULT_HEADERS = {
+  "User-Agent": "Mozilla/5.0",
+  "Referer": "https://123moviesfree.club/",
+  "Origin": "https://123moviesfree.club"
+};
+
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of subCache.entries()) {
@@ -106,21 +112,64 @@ module.exports = {
       if (season > 0) {
         const { data } = await axios.get(`${UPSTREAM_BASE}/dl/${encodeURIComponent(subjectId)}`, {
           params: { se: season },
-          timeout: 25000
+          timeout: 30000
         });
 
         const episodes = (data.episodes || []).map((epObj) => {
           const epNum = parseInt(epObj.episode, 10) || 0;
-          const mappedEp = { ...epObj };
+          const epDownloads = [];
 
-          if ("sinhala subtitle" in mappedEp) {
-            mappedEp["sinhala subtitle"] = buildApexSubUrl(epObj["sinhala subtitle"], "si", epNum);
-          }
-          if ("english subtitle" in mappedEp) {
-            mappedEp["english subtitle"] = buildApexSubUrl(epObj["english subtitle"], "en", epNum);
+          // 1. Upstream එකෙන් කෙලින්ම downloads හෝ streams array එකක් ආවොත්
+          const existingList = epObj.downloads || epObj.streams;
+          if (Array.isArray(existingList)) {
+            existingList.forEach((item) => {
+              const link = item.dl_link || item.link || item.url;
+              if (link) {
+                epDownloads.push({
+                  quality: item.quality || "HD",
+                  size: item.size || (item.size_mb ? `${item.size_mb} MB` : "Unknown"),
+                  ...(item.cookie && { cookie: item.cookie }),
+                  dl_link: link,
+                  headers: item.headers || DEFAULT_HEADERS
+                });
+              }
+            });
           }
 
-          return mappedEp;
+          // 2. Object keys ලෙස ආවොත් ("1080p download", "720p", "480p_download" ආදී ඕනෑම format එකක්)
+          Object.entries(epObj).forEach(([key, val]) => {
+            if (!val || typeof val !== "object" || Array.isArray(val)) return;
+            const link = val.link || val.dl_link || val.url;
+            if (!link) return;
+
+            const qMatch = key.match(/(\d{3,4}p|4k)/i);
+            const qualityName = qMatch ? qMatch[1].toLowerCase() : key.replace(/download/i, "").trim();
+
+            if (!epDownloads.some((d) => d.dl_link === link)) {
+              epDownloads.push({
+                quality: qualityName || "HD",
+                size: val.size || (val.size_mb ? `${val.size_mb} MB` : "Unknown"),
+                ...(val.cookie && { cookie: val.cookie }),
+                dl_link: link,
+                headers: val.headers || DEFAULT_HEADERS
+              });
+            }
+          });
+
+          // Quality අනුපිළිවෙළට සැකසීම (1080p -> 720p -> 480p -> 360p)
+          epDownloads.sort((a, b) => (parseInt(b.quality, 10) || 0) - (parseInt(a.quality, 10) || 0));
+
+          const rawSi = epObj["sinhala subtitle"] || epObj.subtitles?.sinhala || null;
+          const rawEn = epObj["english subtitle"] || epObj.subtitles?.english || null;
+
+          return {
+            episode: String(epObj.episode || String(epNum).padStart(2, "0")),
+            downloads: epDownloads,
+            subtitles: {
+              sinhala: buildApexSubUrl(rawSi, "si", epNum),
+              english: buildApexSubUrl(rawEn, "en", epNum)
+            }
+          };
         });
 
         return res.json({
@@ -144,7 +193,7 @@ module.exports = {
         size: d.size || (d.size_mb ? `${d.size_mb} MB` : "Adaptive"),
         ...(d.cookie && { cookie: d.cookie }),
         dl_link: d.dl_link || d.url,
-        headers: d.headers
+        headers: d.headers || DEFAULT_HEADERS
       }));
 
       const rawSubs = data.subtitles || {};
