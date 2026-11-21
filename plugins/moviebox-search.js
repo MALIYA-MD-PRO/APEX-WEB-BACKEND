@@ -32,9 +32,10 @@ module.exports = {
       const results = (data.results || []).map((item) => {
         const isSeries = item.subject_type === 2 || item.type?.toLowerCase() === "series";
         return {
-          subjectId: item.subject_id,
+          subjectId: String(item.subject_id),
           title: item.title,
           type: item.type || (isSeries ? "Series" : "Movie"),
+          subjectType: item.subject_type,
           releaseDate: item.release_date || null,
           imdbRating: item.imdb_rating || null,
           genre: item.genre || null,
