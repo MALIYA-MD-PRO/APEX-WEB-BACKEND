@@ -3,7 +3,7 @@ const axios = require("axios");
 const UPSTREAM_BASE = "https://moviebox-api-production-a558ac84.up.railway.app";
 
 module.exports = {
-  name: "MovieBox · TV Series Seasons",
+  name: "MovieBox · Season",
   category: "movie",
   method: "GET",
   path: "/api/v1/movies/moviebox/epi",
@@ -14,7 +14,7 @@ module.exports = {
       if (!subjectId) {
         return res.status(400).json({
           success: false,
-          error: "Parameter 'id' (subject_id) is required"
+          error: "Parameter 'id' is required"
         });
       }
 
@@ -26,7 +26,6 @@ module.exports = {
       const currentHost = `${protocol}://${req.get("host")}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
-      // Upstream dl_endpoint එක වෙනුවට අපගේ Apex API link එක ලබා දීම
       const seasons = (data.seasons || []).map((s) => ({
         season: s.season,
         episodes_count: s.episodes_count,
@@ -44,7 +43,7 @@ module.exports = {
       const rawErr = err.response?.data?.detail || err.message;
       return res.status(err.response?.status || 500).json({
         success: false,
-        error: "MovieBox Episodes Fetch Failed: " + (typeof rawErr === "object" ? JSON.stringify(rawErr) : rawErr)
+        error: "MovieBox Season Failed: " + (typeof rawErr === "object" ? JSON.stringify(rawErr) : rawErr)
       });
     }
   }
