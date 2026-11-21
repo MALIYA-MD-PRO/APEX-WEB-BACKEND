@@ -15,7 +15,7 @@ module.exports = {
       if (!query) {
         return res.status(400).json({
           success: false,
-          error: "Query parameter 'q' is required (e.g. ?q=Breaking+Bad)"
+          error: "Parameter 'q' is required"
         });
       }
 
@@ -34,14 +34,13 @@ module.exports = {
           subject_id: String(item.subject_id),
           title: item.title,
           type: item.type || (isSeries ? "Series" : "Movie"),
-          subject_type: item.subject_type,
           release_date: item.release_date || null,
           imdb_rating: item.imdb_rating || null,
           genre: item.genre || null,
-          cover: item.cover || null,
           language: item.language || null,
-          detail_endpoint: `${currentHost}/api/v1/movies/moviebox/detail?id=${item.subject_id}${apiKeyParam}`,
-          next_step_endpoint: isSeries
+          cover: item.cover || null,
+          info_endpoint: `${currentHost}/api/v1/movies/moviebox/detail?id=${item.subject_id}${apiKeyParam}`,
+          next_endpoint: isSeries
             ? `${currentHost}/api/v1/movies/moviebox/epi?id=${item.subject_id}${apiKeyParam}`
             : `${currentHost}/api/v1/movies/moviebox/dl?id=${item.subject_id}${apiKeyParam}`
         };
