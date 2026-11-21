@@ -108,44 +108,27 @@ module.exports = {
         return `${currentHost}/api/v1/movies/moviebox/dl?id=${encodeURIComponent(subjectId)}&sub=${lang}&se=${season}&ep=${epNum}${apiKeyParam}`;
       };
 
-      // ── CASE A: TV Series Season Download (season > 0) ───────────────────
+      // ── CASE A: TV Series Season Download (/dl/{id}?se=1) ─────────────────
       if (season > 0) {
         const { data } = await axios.get(`${UPSTREAM_BASE}/dl/${encodeURIComponent(subjectId)}`, {
           params: { se: season },
           timeout: 30000
         });
 
-        const episodes = (data.episodes || []).map((epObj) => {
-          const epNum = parseInt(epObj.episode, 10) || 0;
-          const epDownloads = [];
+        const episodes = await Promise.all(
+          (data.episodes || []).map(async (epObj) => {
+            const epNum = parseInt(epObj.episode, 10) || 0;
+            const epDownloads = [];
 
-          // 1. Upstream එකෙන් කෙලින්ම downloads හෝ streams array එකක් ආවොත්
-          const existingList = epObj.downloads || epObj.streams;
-          if (Array.isArray(existingList)) {
-            existingList.forEach((item) => {
-              const link = item.dl_link || item.link || item.url;
-              if (link) {
-                epDownloads.push({
-                  quality: item.quality || "HD",
-                  size: item.size || (item.size_mb ? `${item.size_mb} MB` : "Unknown"),
-                  ...(item.cookie && { cookie: item.cookie }),
-                  dl_link: link,
-                  headers: item.headers || DEFAULT_HEADERS
-                });
-              }
-            });
-          }
+            // 1. Upstream /dl/{id}?se=X වෙතින් එන "360p download", "720p download", "1080p download" ලබා ගැනීම
+            Object.entries(epObj).forEach(([key, val]) => {
+              if (!val || typeof val !== "object" || Array.isArray(val)) return;
+              const link = val.link || val.dl_link || val.url;
+              if (!link) return;
 
-          // 2. Object keys ලෙස ආවොත් ("1080p download", "720p", "480p_download" ආදී ඕනෑම format එකක්)
-          Object.entries(epObj).forEach(([key, val]) => {
-            if (!val || typeof val !== "object" || Array.isArray(val)) return;
-            const link = val.link || val.dl_link || val.url;
-            if (!link) return;
+              const qMatch = key.match(/(\d{3,4}p|4k)/i);
+              const qualityName = qMatch ? qMatch[1].toLowerCase() : key.replace(/download/i, "").trim();
 
-            const qMatch = key.match(/(\d{3,4}p|4k)/i);
-            const qualityName = qMatch ? qMatch[1].toLowerCase() : key.replace(/download/i, "").trim();
-
-            if (!epDownloads.some((d) => d.dl_link === link)) {
               epDownloads.push({
                 quality: qualityName || "HD",
                 size: val.size || (val.size_mb ? `${val.size_mb} MB` : "Unknown"),
@@ -153,24 +136,47 @@ module.exports = {
                 dl_link: link,
                 headers: val.headers || DEFAULT_HEADERS
               });
+            });
+
+            // 2. Fallback: Upstream /dl හි links හිස් නම් /api/stream/{id}?se=X&ep=Y වෙතින් ලබා ගැනීම
+            if (epDownloads.length === 0 && epNum > 0) {
+              try {
+                const { data: epStreamData } = await axios.get(
+                  `${UPSTREAM_BASE}/api/stream/${encodeURIComponent(subjectId)}`,
+                  { params: { se: season, ep: epNum }, timeout: 12000 }
+                );
+                const list = epStreamData.downloads || epStreamData.streams || [];
+                list.forEach((s) => {
+                  const link = s.dl_link || s.url || s.link;
+                  if (link) {
+                    epDownloads.push({
+                      quality: s.quality || "HD",
+                      format: s.format || "MP4",
+                      size: s.size || (s.size_mb ? `${s.size_mb} MB` : "Adaptive"),
+                      ...(s.cookie && { cookie: s.cookie }),
+                      dl_link: link,
+                      headers: s.headers || DEFAULT_HEADERS
+                    });
+                  }
+                });
+              } catch (_) {}
             }
-          });
 
-          // Quality අනුපිළිවෙළට සැකසීම (1080p -> 720p -> 480p -> 360p)
-          epDownloads.sort((a, b) => (parseInt(b.quality, 10) || 0) - (parseInt(a.quality, 10) || 0));
+            epDownloads.sort((a, b) => (parseInt(b.quality, 10) || 0) - (parseInt(a.quality, 10) || 0));
 
-          const rawSi = epObj["sinhala subtitle"] || epObj.subtitles?.sinhala || null;
-          const rawEn = epObj["english subtitle"] || epObj.subtitles?.english || null;
+            const rawSi = epObj["sinhala subtitle"] || epObj.subtitles?.sinhala || null;
+            const rawEn = epObj["english subtitle"] || epObj.subtitles?.english || null;
 
-          return {
-            episode: String(epObj.episode || String(epNum).padStart(2, "0")),
-            downloads: epDownloads,
-            subtitles: {
-              sinhala: buildApexSubUrl(rawSi, "si", epNum),
-              english: buildApexSubUrl(rawEn, "en", epNum)
-            }
-          };
-        });
+            return {
+              episode: String(epObj.episode || String(epNum).padStart(2, "0")),
+              downloads: epDownloads,
+              subtitles: {
+                sinhala: buildApexSubUrl(rawSi, "si", epNum),
+                english: buildApexSubUrl(rawEn, "en", epNum)
+              }
+            };
+          })
+        );
 
         return res.json({
           success: true,
@@ -182,7 +188,7 @@ module.exports = {
         });
       }
 
-      // ── CASE B: Single Movie Download ────────────────────────────────────
+      // ── CASE B: Single Movie Download (/api/stream/{id}) ──────────────────
       const { data } = await axios.get(`${UPSTREAM_BASE}/api/stream/${encodeURIComponent(subjectId)}`, {
         timeout: 15000
       });
