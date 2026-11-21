@@ -11,17 +11,16 @@ module.exports = {
     try {
       const query = (req.query.q || req.query.query || "").trim();
       const page = parseInt(req.query.page, 10) || 1;
-      const perPage = parseInt(req.query.per_page, 10) || 20;
 
       if (!query) {
         return res.status(400).json({
           success: false,
-          error: "Query parameter 'q' is required (e.g. ?q=Avatar)"
+          error: "Query parameter 'q' is required (e.g. ?q=Breaking+Bad)"
         });
       }
 
       const { data } = await axios.get(`${UPSTREAM_BASE}/search`, {
-        params: { q: query, page, per_page: perPage },
+        params: { q: query, page },
         timeout: 15000
       });
 
@@ -32,18 +31,18 @@ module.exports = {
       const results = (data.results || []).map((item) => {
         const isSeries = item.subject_type === 2 || item.type?.toLowerCase() === "series";
         return {
-          subjectId: String(item.subject_id),
+          subject_id: String(item.subject_id),
           title: item.title,
           type: item.type || (isSeries ? "Series" : "Movie"),
-          subjectType: item.subject_type,
-          releaseDate: item.release_date || null,
-          imdbRating: item.imdb_rating || null,
+          subject_type: item.subject_type,
+          release_date: item.release_date || null,
+          imdb_rating: item.imdb_rating || null,
           genre: item.genre || null,
-          language: item.language || null,
           cover: item.cover || null,
-          detailEndpoint: `${currentHost}/api/v1/movies/moviebox/detail?id=${item.subject_id}${apiKeyParam}`,
-          streamEndpoint: isSeries
-            ? `${currentHost}/api/v1/movies/moviebox/dl?id=${item.subject_id}&se=1&ep=1${apiKeyParam}`
+          language: item.language || null,
+          detail_endpoint: `${currentHost}/api/v1/movies/moviebox/detail?id=${item.subject_id}${apiKeyParam}`,
+          next_step_endpoint: isSeries
+            ? `${currentHost}/api/v1/movies/moviebox/epi?id=${item.subject_id}${apiKeyParam}`
             : `${currentHost}/api/v1/movies/moviebox/dl?id=${item.subject_id}${apiKeyParam}`
         };
       });
