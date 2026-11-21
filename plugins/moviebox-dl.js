@@ -14,7 +14,7 @@ module.exports = {
   path: "/api/v1/movies/moviebox/dl",
   handler: async (req, res) => {
     try {
-      // ── 1. Dedicated Proxy Force Auto-Download Gateway (Bypasses CDN Referer Block) ──
+      // ── 1. Dedicated Proxy Force Auto-Download Gateway ───────────────────
       if (req.query.stream) {
         const targetUrl = decodeURIComponent(req.query.stream);
         const fileName = req.query.filename || `MovieBox_${Date.now()}.mp4`;
@@ -40,7 +40,7 @@ module.exports = {
         return cdnStream.data.pipe(res);
       }
 
-      // ── 2. Fetch Streams & Subtitles Metadata ────────────────────────────
+      // ── 2. Fetch Streams & Multi-Language Captions ───────────────────────
       const subjectId = (req.query.id || req.query.subject_id || "").trim();
       const season = parseInt(req.query.se || req.query.season, 10) || 0;
       const episode = parseInt(req.query.ep || req.query.episode, 10) || 0;
@@ -79,7 +79,6 @@ module.exports = {
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
       const epTag = season > 0 ? `_S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}` : "";
 
-      // Filter & Map Video Streams
       const streams = (streamData.streams || []).map((s) => {
         const isMp4 = s.format === "MP4";
         const fileName = `MovieBox_${subjectId}${epTag}_${s.quality_value || "HD"}p.mp4`;
@@ -88,25 +87,25 @@ module.exports = {
           quality: s.quality,
           qualityValue: s.quality_value,
           format: s.format,
-          sizeMB: s.size_mb || 0,
-          codec: s.codec,
-          durationSeconds: s.duration_sec || null,
+          sizeMB: s.size_mb ?? 0,
+          codec: s.codec || null,
+          durationSec: s.duration_sec || null,
+          cookie: s.cookie || null,
           directUrl: s.url,
-          requiredHeaders: s.headers || CDN_HEADERS,
+          headers: s.headers || CDN_HEADERS,
           autoDownloadUrl: isMp4
             ? `${currentHost}/api/v1/movies/moviebox/dl?stream=${encodeURIComponent(s.url)}&filename=${fileName}${apiKeyParam}`
             : null
         };
       });
 
-      // Map Subtitles (.srt)
       const subtitles = (captionData.captions || []).map((c) => {
         const subFileName = `MovieBox_${subjectId}${epTag}_${c.code || "sub"}.srt`;
         return {
-          id: c.id,
+          id: String(c.id),
           language: c.language,
           code: c.code,
-          sizeBytes: c.size || null,
+          sizeBytes: c.size ? Number(c.size) : null,
           directUrl: c.url,
           autoDownloadUrl: `${currentHost}/api/v1/movies/moviebox/dl?stream=${encodeURIComponent(c.url)}&filename=${subFileName}${apiKeyParam}`
         };
@@ -114,9 +113,9 @@ module.exports = {
 
       return res.json({
         success: true,
-        subjectId: String(subjectId),
-        season,
-        episode,
+        subjectId: String(streamData.subject_id || subjectId),
+        season: streamData.season ?? season,
+        episode: streamData.episode ?? episode,
         totalStreams: streams.length,
         streams,
         totalSubtitles: subtitles.length,
