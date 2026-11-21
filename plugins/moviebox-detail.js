@@ -3,7 +3,7 @@ const axios = require("axios");
 const UPSTREAM_BASE = "https://moviebox-api-production-a558ac84.up.railway.app";
 
 module.exports = {
-  name: "MovieBox · Info & Episodes",
+  name: "MovieBox · Full Metadata & Dubs",
   category: "movie",
   method: "GET",
   path: "/api/v1/movies/moviebox/detail",
@@ -23,52 +23,43 @@ module.exports = {
       });
 
       const isSeries = detail.subject_type === 2 || detail.type?.toLowerCase() === "series";
-      let seasons = [];
-
-      if (isSeries) {
-        try {
-          const { data: epData } = await axios.get(`${UPSTREAM_BASE}/episodes/${encodeURIComponent(subjectId)}`, {
-            timeout: 12000
-          });
-          seasons = epData.seasons || [];
-        } catch (_) {}
-      }
-
       const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
       const currentHost = `${protocol}://${req.get("host")}`;
       const apiKeyParam = req.query.api ? `&api=${encodeURIComponent(req.query.api)}` : "";
 
+      const dubs = (detail.dubs || []).map((d) => ({
+        subject_id: String(d.subject_id),
+        lang_name: d.lang_name,
+        language: d.language || null,
+        endpoint: isSeries
+          ? `${currentHost}/api/v1/movies/moviebox/epi?id=${d.subject_id}${apiKeyParam}`
+          : `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}${apiKeyParam}`
+      }));
+
       return res.json({
         success: true,
-        subjectId: String(detail.subject_id),
+        subject_id: String(detail.subject_id),
         title: detail.title,
+        subject_type: detail.subject_type,
         type: detail.type || (isSeries ? "Series" : "Movie"),
         description: detail.description || "",
-        releaseDate: detail.release_date || null,
+        release_date: detail.release_date || null,
         duration: detail.duration || null,
-        imdbRating: detail.imdb_rating || null,
+        imdb_rating: detail.imdb_rating || null,
         genre: detail.genre || null,
         country: detail.country || null,
         language: detail.language || null,
         cover: detail.cover || null,
-        detailPath: detail.detail_path || null,
-        dubs: (detail.dubs || []).map((d) => ({
-          subjectId: String(d.subject_id),
-          langName: d.lang_name,
-          language: d.language || null,
-          streamEndpoint: isSeries
-            ? `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}&se=1&ep=1${apiKeyParam}`
-            : `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}${apiKeyParam}`
-        })),
-        seasons,
-        streamEndpoint: isSeries
-          ? `${currentHost}/api/v1/movies/moviebox/dl?id=${subjectId}&se=1&ep=1${apiKeyParam}`
+        dubs,
+        next_step_endpoint: isSeries
+          ? `${currentHost}/api/v1/movies/moviebox/epi?id=${subjectId}${apiKeyParam}`
           : `${currentHost}/api/v1/movies/moviebox/dl?id=${subjectId}${apiKeyParam}`
       });
     } catch (err) {
+      const rawErr = err.response?.data?.detail || err.message;
       return res.status(err.response?.status || 500).json({
         success: false,
-        error: "MovieBox Detail Failed: " + (err.response?.data?.detail || err.message)
+        error: "MovieBox Detail Failed: " + (typeof rawErr === "object" ? JSON.stringify(rawErr) : rawErr)
       });
     }
   }
