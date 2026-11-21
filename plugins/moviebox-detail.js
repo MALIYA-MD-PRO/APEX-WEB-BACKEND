@@ -40,22 +40,25 @@ module.exports = {
 
       return res.json({
         success: true,
-        subjectId: detail.subject_id,
+        subjectId: String(detail.subject_id),
         title: detail.title,
         type: detail.type || (isSeries ? "Series" : "Movie"),
         description: detail.description || "",
         releaseDate: detail.release_date || null,
-        durationSeconds: detail.duration || null,
+        duration: detail.duration || null,
         imdbRating: detail.imdb_rating || null,
         genre: detail.genre || null,
         country: detail.country || null,
         language: detail.language || null,
         cover: detail.cover || null,
+        detailPath: detail.detail_path || null,
         dubs: (detail.dubs || []).map((d) => ({
-          subjectId: d.subject_id,
-          languageName: d.lang_name,
-          code: d.language,
-          streamEndpoint: `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}${apiKeyParam}`
+          subjectId: String(d.subject_id),
+          langName: d.lang_name,
+          language: d.language || null,
+          streamEndpoint: isSeries
+            ? `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}&se=1&ep=1${apiKeyParam}`
+            : `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}${apiKeyParam}`
         })),
         seasons,
         streamEndpoint: isSeries
