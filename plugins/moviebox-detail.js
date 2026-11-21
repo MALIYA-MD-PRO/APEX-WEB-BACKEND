@@ -3,7 +3,7 @@ const axios = require("axios");
 const UPSTREAM_BASE = "https://moviebox-api-production-a558ac84.up.railway.app";
 
 module.exports = {
-  name: "MovieBox · Full Metadata & Dubs",
+  name: "MovieBox · Info",
   category: "movie",
   method: "GET",
   path: "/api/v1/movies/moviebox/detail",
@@ -14,7 +14,7 @@ module.exports = {
       if (!subjectId) {
         return res.status(400).json({
           success: false,
-          error: "Parameter 'id' (subject_id) is required"
+          error: "Parameter 'id' is required"
         });
       }
 
@@ -30,7 +30,6 @@ module.exports = {
       const dubs = (detail.dubs || []).map((d) => ({
         subject_id: String(d.subject_id),
         lang_name: d.lang_name,
-        language: d.language || null,
         endpoint: isSeries
           ? `${currentHost}/api/v1/movies/moviebox/epi?id=${d.subject_id}${apiKeyParam}`
           : `${currentHost}/api/v1/movies/moviebox/dl?id=${d.subject_id}${apiKeyParam}`
@@ -40,7 +39,6 @@ module.exports = {
         success: true,
         subject_id: String(detail.subject_id),
         title: detail.title,
-        subject_type: detail.subject_type,
         type: detail.type || (isSeries ? "Series" : "Movie"),
         description: detail.description || "",
         release_date: detail.release_date || null,
@@ -51,7 +49,7 @@ module.exports = {
         language: detail.language || null,
         cover: detail.cover || null,
         dubs,
-        next_step_endpoint: isSeries
+        next_endpoint: isSeries
           ? `${currentHost}/api/v1/movies/moviebox/epi?id=${subjectId}${apiKeyParam}`
           : `${currentHost}/api/v1/movies/moviebox/dl?id=${subjectId}${apiKeyParam}`
       });
@@ -59,7 +57,7 @@ module.exports = {
       const rawErr = err.response?.data?.detail || err.message;
       return res.status(err.response?.status || 500).json({
         success: false,
-        error: "MovieBox Detail Failed: " + (typeof rawErr === "object" ? JSON.stringify(rawErr) : rawErr)
+        error: "MovieBox Info Failed: " + (typeof rawErr === "object" ? JSON.stringify(rawErr) : rawErr)
       });
     }
   }
