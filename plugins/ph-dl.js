@@ -13,10 +13,7 @@ function extractMediaDefinitions(s) {
     if (s[i] === "[") depth++;
     else if (s[i] === "]") {
       depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
+      if (depth === 0) { end = i; break; }
     }
   }
   try {
@@ -48,15 +45,15 @@ function formatFileSize(bytes) {
   return `${mb.toFixed(2)} MB`;
 }
 
-async function fetchVideoSize(mp4Url, refererUrl, cookies) {
+// Single-shot Worker stream URL එකෙන් Range 0-1 check කරලා size එක ගැනීම
+async function fetchVideoSizeFromWorker(workerStreamUrl) {
   try {
-    const workerReqUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent(refererUrl)}&cookie=${encodeURIComponent(cookies)}`;
     const res = await axios({
       method: "GET",
-      url: workerReqUrl,
+      url: workerStreamUrl,
       responseType: "stream",
       headers: { "Range": "bytes=0-1" },
-      timeout: 8000,
+      timeout: 10000,
       validateStatus: (status) => status >= 200 && status < 400
     });
 
@@ -92,7 +89,6 @@ module.exports = {
       const url = rawUrl.replace(/\/\/(m|cn|de|fr|es|it|jp|nl|pl|pt|ru)\.pornhub\.com/i, "//www.pornhub.com");
       let sessionCookies = "accessAgeDisclaimerPH=1; age_verified=1";
 
-      // 1. Page HTML සහ Upstream Session Cookies ලබා ගැනීම
       const pageWorkerUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(url)}&ref=${encodeURIComponent("https://www.pornhub.com/")}&cookie=${encodeURIComponent(sessionCookies)}`;
       const pageRes = await axios.get(pageWorkerUrl, { timeout: 20000 });
       const data = pageRes.data;
@@ -129,7 +125,6 @@ module.exports = {
         return res.status(404).json({ success: false, error: "Could not extract media definitions from this page." });
       }
 
-      // 2. Direct MP4 entries page එකේම තියෙනවද බැලීම, නැත්නම් MP4 JSON endpoint එක call කිරීම
       let validQualities = mediaDefinitions.filter(
         (d) => d.format === "mp4" && d.videoUrl && !d.videoUrl.includes("/video/get_media")
       );
@@ -147,7 +142,7 @@ module.exports = {
       if (!validQualities.length) {
         return res.status(404).json({
           success: false,
-          error: "No downloadable MP4 resolutions found (Video may be HLS-only or geo-restricted).",
+          error: "No downloadable MP4 resolutions found.",
           availableFormats: mediaDefinitions.map((d) => ({ format: d.format, quality: d.quality }))
         });
       }
@@ -158,13 +153,15 @@ module.exports = {
         validQualities.map(async (q) => {
           const qualityLabel = `${q.quality}p`;
           const fileName = `${safeTitle}_${qualityLabel}.mp4`;
-          const sizeFormatted = await fetchVideoSize(q.videoUrl, url, sessionCookies);
+          // Single-Shot Worker Stream URL (Zero IP Mismatch!)
+          const streamUrl = `${CF_WORKER_URL}/?page=${encodeURIComponent(url)}&q=${encodeURIComponent(q.quality)}&filename=${encodeURIComponent(fileName)}`;
+          const sizeFormatted = await fetchVideoSizeFromWorker(streamUrl);
 
           return {
             quality: qualityLabel,
             size: sizeFormatted,
             directUrl: q.videoUrl,
-            streamUrl: `${CF_WORKER_URL}/?url=${encodeURIComponent(q.videoUrl)}&ref=${encodeURIComponent(url)}&filename=${encodeURIComponent(fileName)}`
+            streamUrl
           };
         })
       );
