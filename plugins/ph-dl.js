@@ -1,7 +1,6 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
-// 👇 මෙතනට ඔයාගේ Cloudflare Worker Link එක දාන්න (අගට / නැතුව)
 const CF_WORKER_URL = "https://apex-api-ph.malindunadith52.workers.dev";
 
 function extractMediaDefinitions(s) {
@@ -49,9 +48,9 @@ function formatFileSize(bytes) {
   return `${mb.toFixed(2)} MB`;
 }
 
-async function fetchVideoSize(mp4Url, refererUrl) {
+async function fetchVideoSize(mp4Url, refererUrl, cookies) {
   try {
-    const workerReqUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent(refererUrl)}`;
+    const workerReqUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent(refererUrl)}&cookie=${encodeURIComponent(cookies)}`;
     const res = await axios({
       method: "GET",
       url: workerReqUrl,
@@ -91,12 +90,18 @@ module.exports = {
       }
 
       const url = rawUrl.replace(/\/\/(m|cn|de|fr|es|it|jp|nl|pl|pt|ru)\.pornhub\.com/i, "//www.pornhub.com");
-      const sessionCookies = "accessAgeDisclaimerPH=1; age_verified=1";
+      let sessionCookies = "accessAgeDisclaimerPH=1; age_verified=1";
 
+      // 1. Page HTML සහ Upstream Session Cookies ලබා ගැනීම
       const pageWorkerUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(url)}&ref=${encodeURIComponent("https://www.pornhub.com/")}&cookie=${encodeURIComponent(sessionCookies)}`;
-      const { data } = await axios.get(pageWorkerUrl, { timeout: 20000 });
-      const $ = cheerio.load(data);
+      const pageRes = await axios.get(pageWorkerUrl, { timeout: 20000 });
+      const data = pageRes.data;
 
+      if (pageRes.headers["x-upstream-cookies"]) {
+        sessionCookies = `${sessionCookies}; ${pageRes.headers["x-upstream-cookies"]}`;
+      }
+
+      const $ = cheerio.load(data);
       const title = $("h1.title span").first().text().trim() || $("title").text().replace("- Pornhub.com", "").trim();
       const thumbnail = $('meta[property="og:image"]').attr("content") || null;
 
@@ -124,17 +129,27 @@ module.exports = {
         return res.status(404).json({ success: false, error: "Could not extract media definitions from this page." });
       }
 
-      const mp4Endpoint = mediaDefinitions.find((d) => d.format === "mp4" && d.videoUrl);
-      if (!mp4Endpoint) {
-        return res.status(404).json({ success: false, error: "MP4 stream endpoint not found." });
-      }
-
-      const mp4JsonWorkerUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(mp4Endpoint.videoUrl)}&ref=${encodeURIComponent(url)}&cookie=${encodeURIComponent(sessionCookies)}&xhr=1`;
-      const mp4Res = await axios.get(mp4JsonWorkerUrl, { timeout: 15000 });
-      const validQualities = (mp4Res.data || []).filter((d) => d.videoUrl);
+      // 2. Direct MP4 entries page එකේම තියෙනවද බැලීම, නැත්නම් MP4 JSON endpoint එක call කිරීම
+      let validQualities = mediaDefinitions.filter(
+        (d) => d.format === "mp4" && d.videoUrl && !d.videoUrl.includes("/video/get_media")
+      );
 
       if (!validQualities.length) {
-        return res.status(404).json({ success: false, error: "No downloadable MP4 resolutions found." });
+        const mp4Endpoint = mediaDefinitions.find((d) => d.format === "mp4" && d.videoUrl);
+        if (mp4Endpoint) {
+          const mp4JsonWorkerUrl = `${CF_WORKER_URL}/?url=${encodeURIComponent(mp4Endpoint.videoUrl)}&ref=${encodeURIComponent(url)}&cookie=${encodeURIComponent(sessionCookies)}&xhr=1`;
+          const mp4Res = await axios.get(mp4JsonWorkerUrl, { timeout: 15000 });
+          const rawList = Array.isArray(mp4Res.data) ? mp4Res.data : [];
+          validQualities = rawList.filter((d) => d.videoUrl);
+        }
+      }
+
+      if (!validQualities.length) {
+        return res.status(404).json({
+          success: false,
+          error: "No downloadable MP4 resolutions found (Video may be HLS-only or geo-restricted).",
+          availableFormats: mediaDefinitions.map((d) => ({ format: d.format, quality: d.quality }))
+        });
       }
 
       const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
@@ -143,7 +158,7 @@ module.exports = {
         validQualities.map(async (q) => {
           const qualityLabel = `${q.quality}p`;
           const fileName = `${safeTitle}_${qualityLabel}.mp4`;
-          const sizeFormatted = await fetchVideoSize(q.videoUrl, url);
+          const sizeFormatted = await fetchVideoSize(q.videoUrl, url, sessionCookies);
 
           return {
             quality: qualityLabel,
