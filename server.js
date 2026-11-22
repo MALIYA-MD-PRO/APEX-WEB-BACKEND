@@ -88,7 +88,9 @@ const SYSTEM_ENDPOINTS = [
   { id: 'moviebox-detail', name: 'MovieBox · Full Metadata & Dubs', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/detail' },
   { id: 'moviebox-epi', name: 'MovieBox · TV Series Seasons', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/epi' },
   { id: 'moviebox-dl', name: 'MovieBox · Movie & Batch Series DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/dl' },
-  { id: 'moviebox-sub', name: 'MovieBox · Subtitle Cache Server', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/sub' }
+  { id: 'moviebox-sub', name: 'MovieBox · Subtitle Cache Server', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/moviebox/sub' },
+  { id: 'nkiri-search', name: 'Nkiri · Search', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/nkiri/search' },
+  { id: 'nkiri-dl', name: 'Nkiri · All Episodes Direct DL', category: 'movie', categoryLabel: 'Movie', path: '/api/v1/movies/nkiri/dl' }
 ];
 
 // ══════════════════════════════════════════════════════════════
